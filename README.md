@@ -130,6 +130,20 @@ Elsewhere: `/` opens search, `N` toggles N.O.V.A.
 
 ---
 
+## Fire TV
+
+There's a Fire Stick app — a thin native shell around this same interface,
+with the remote's D-pad wired up to move between posters and buttons. Grab it
+with the **Downloader** app; see [`firetv/README.md`](firetv/README.md) for
+the full walkthrough. The direct download link, rebuilt automatically on
+every push:
+
+```
+https://github.com/fjstabler/ECLIPSE/releases/download/firetv-latest/eclipse-firetv.apk
+```
+
+---
+
 ## N.O.V.A.
 
 N.O.V.A. works in two layers, and the first one needs no API key at all.
@@ -264,6 +278,8 @@ web/
   index.html        The whole client shell
   css/eclipse.css   The design system
   js/               ES modules, served straight from disk
+  js/tvnav.js       Arrow-key spatial navigation, for keyboards and TV remotes
+firetv/             Native Fire TV shell — see firetv/README.md
 ```
 
 **No build step.** The client is plain ES modules and CSS. Edit and refresh.
@@ -279,7 +295,6 @@ near-black surfaces. Change `--corona` and the whole app follows.
 Version 1 is deliberately a browser app so the interface can be judged and
 changed quickly. The obvious next steps:
 
-- Native apps wrapping the same API (the server is already a clean HTTP surface)
 - Hardware-accelerated transcoding and HLS for seeking within converted streams
 - Downloads for offline viewing
 - Chromecast / AirPlay

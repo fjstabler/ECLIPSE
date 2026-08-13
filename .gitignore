@@ -11,3 +11,11 @@ Thumbs.db
 *.db
 *.db-wal
 *.db-shm
+
+# Fire TV app — build output and machine-specific SDK path
+firetv/local.properties
+firetv/.gradle/
+firetv/build/
+firetv/app/build/
+firetv/*.iml
+firetv/app/*.iml

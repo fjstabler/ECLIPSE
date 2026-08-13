@@ -1,0 +1,2 @@
+rootProject.name = "ECLIPSE-TV"
+include ':app'

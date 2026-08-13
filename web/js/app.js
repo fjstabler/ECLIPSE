@@ -10,6 +10,7 @@ import { AuthView } from './views/auth.js';
 import { openSearch, closeSearch, isSearchOpen } from './views/search.js';
 import { toggleNova, openNova, closeNova } from './components/nova.js';
 import { closePlayer } from './components/player.js';
+import { initTvNav } from './tvnav.js';
 
 const app = document.getElementById('app');
 
@@ -55,6 +56,7 @@ function mountShell() {
 
   bindGlobalKeys();
   bindScroll();
+  initTvNav();
 }
 
 function Nav() {

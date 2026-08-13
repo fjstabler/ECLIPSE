@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.Eclipse" parent="android:Theme.Black.NoTitleBar.Fullscreen">
+        <item name="android:windowBackground">#08080C</item>
+        <item name="android:navigationBarColor">#08080C</item>
+        <item name="android:statusBarColor">#08080C</item>
+    </style>
+</resources>

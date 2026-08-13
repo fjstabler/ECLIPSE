@@ -1,0 +1,58 @@
+name: Build Fire TV APK
+
+# Builds the ECLIPSE Fire TV app (firetv/) and publishes it as a GitHub
+# Release asset — a stable, public URL that the Downloader app on a Fire TV
+# can fetch directly, with nothing to authenticate.
+
+on:
+  push:
+    paths:
+      - 'firetv/**'
+      - '.github/workflows/firetv-apk.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK platform and build-tools
+        run: yes | sdkmanager "platforms;android-34" "build-tools;34.0.0" > /dev/null
+
+      - name: Build debug APK
+        working-directory: firetv
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Rename APK
+        run: cp firetv/app/build/outputs/apk/debug/app-debug.apk eclipse-firetv.apk
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: eclipse-firetv-apk
+          path: eclipse-firetv.apk
+
+      - name: Publish/update the "latest" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: firetv-latest
+          name: ECLIPSE for Fire TV
+          body: >
+            The latest build of the ECLIPSE Fire TV app. Sideload it with the
+            Downloader app — see firetv/README.md for the full walkthrough.
+          files: eclipse-firetv.apk

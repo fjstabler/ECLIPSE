@@ -1,0 +1,89 @@
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#08080C">
+
+    <WebView
+        android:id="@+id/webview"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/setup"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="64dp"
+        android:background="#08080C">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="10dp"
+            android:text="ECLIPSE"
+            android:textColor="#FFFFFF"
+            android:textSize="42sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.04" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="28dp"
+            android:text="Enter your ECLIPSE server address"
+            android:textColor="#B8B4C6"
+            android:textSize="18sp" />
+
+        <EditText
+            android:id="@+id/url_field"
+            android:layout_width="520dp"
+            android:layout_height="wrap_content"
+            android:background="@drawable/input_field"
+            android:hint="http://192.168.1.50:8383"
+            android:imeOptions="actionDone"
+            android:inputType="textUri"
+            android:maxLines="1"
+            android:padding="18dp"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#6B6780"
+            android:textSize="18sp" />
+
+        <Button
+            android:id="@+id/connect_button"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:background="@drawable/button_corona"
+            android:paddingLeft="36dp"
+            android:paddingRight="36dp"
+            android:paddingTop="14dp"
+            android:paddingBottom="14dp"
+            android:text="Connect"
+            android:textAllCaps="false"
+            android:textColor="#FFFFFF"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/error_text"
+            android:layout_width="520dp"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:gravity="center"
+            android:textColor="#FF7A45"
+            android:textSize="14sp"
+            android:visibility="gone" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="44dp"
+            android:text="Press Menu on your remote any time to change this."
+            android:textColor="#6B6780"
+            android:textSize="13sp" />
+    </LinearLayout>
+
+</FrameLayout>
