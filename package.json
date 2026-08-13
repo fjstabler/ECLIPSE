@@ -1,13 +1,14 @@
 {
   "name": "eclipse",
   "version": "1.0.0",
-  "description": "ECLIPSE — a self-hosted streaming service for your home network, with NOVA recommendations.",
+  "description": "ECLIPSE — a self-hosted streaming service for your home network, with N.O.V.A. recommendations.",
   "type": "module",
   "main": "server/index.js",
   "engines": {
     "node": ">=20.0.0"
   },
   "scripts": {
+    "setup": "node scripts/setup.js",
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
     "scan": "node scripts/scan.js",

@@ -20,6 +20,18 @@ export function hasTmdb() {
   return Boolean(config.tmdb.apiKey);
 }
 
+let warnedBadKey = false;
+function warnBadKeyOnce() {
+  if (warnedBadKey) return;
+  warnedBadKey = true;
+  console.warn(
+    '\n[metadata] TMDB rejected your API key, so artwork and synopses cannot be fetched.\n' +
+    '           Your films and series will still appear and play, with placeholder posters.\n' +
+    '           Check TMDB_API_KEY in your .env file — run `npm run setup` to change it —\n' +
+    '           then restart and run a scan from Settings → Library.\n'
+  );
+}
+
 async function request(endpoint, params = {}) {
   if (!hasTmdb()) throw new Error('TMDB_API_KEY is not configured');
   const url = new URL(BASE + endpoint);
@@ -49,6 +61,9 @@ async function request(endpoint, params = {}) {
           await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
           continue;
         }
+        // A rejected key would otherwise show up as a cryptic "TMDB 401" once
+        // per title, which reads like a network fault rather than a typo.
+        if (res.status === 401) warnBadKeyOnce();
         throw new Error(`TMDB ${res.status} on ${endpoint}`);
       }
       return res.json();

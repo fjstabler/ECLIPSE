@@ -36,32 +36,30 @@ step, no bundler, no framework. Change a colour in the CSS and refresh.
 
 ## Getting started
 
+You need [Node.js](https://nodejs.org) 20 or newer. Then, in a terminal:
+
 ```bash
 git clone https://github.com/fjstabler/ECLIPSE.git
 cd ECLIPSE
 npm install
-cp .env.example .env
-```
-
-Open `.env` and set your media folders:
-
-```bash
-ECLIPSE_MOVIES_DIR=/mnt/media/Films
-ECLIPSE_SERIES_DIR=/mnt/media/Series
-```
-
-Then:
-
-```bash
+npm run setup
 npm start
 ```
 
-Open the URL it prints. The first profile you create is the administrator.
+`npm run setup` asks where your films and series live and whether you want the
+two optional API keys, then writes the `.env` file for you. That file doesn't
+exist until you run it — it holds private keys, so it's deliberately kept out of
+the repository.
 
-**Want to see the interface before wiring up real media?**
+Open the address it prints. The first profile you create is the administrator.
+
+Re-run `npm run setup` any time to add a key or change a folder; your existing
+answers become the defaults, so pressing Enter through it changes nothing.
+
+**Want to see the interface before pointing it at real media?**
 
 ```bash
-npm run demo      # seeds 12 films and 6 series
+npm run demo              # seeds 12 films and 6 series
 npm run demo -- --clear   # removes them again
 ```
 
@@ -201,7 +199,8 @@ is unreachable.
 
 ## Configuration
 
-Everything lives in `.env`. See `.env.example` for the annotated list. The ones
+Run `npm run setup` to change any of this. It all lives in `.env`, which you can
+also edit by hand — `.env.example` is the annotated reference. The ones
 that matter:
 
 | Variable | What it does |
@@ -219,12 +218,14 @@ that matter:
 ## Commands
 
 ```bash
+npm run setup             # create or update .env (folders and API keys)
 npm start                 # run the server
 npm run dev               # run with auto-restart on file changes
 npm run scan              # scan the library by hand
 npm run scan -- --full    # re-read every file, ignoring the cache
 npm run demo              # seed a demo library
 npm run demo -- --clear   # remove it
+npm run reset             # wipe profiles, history and the scanned library
 node scripts/selftest.js  # check the wiring, parser and engine
 ```
 
