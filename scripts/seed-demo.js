@@ -188,16 +188,51 @@ const SERIES = [
 
 // ---------------------------------------------------------------------------
 
+/**
+ * Remove the demo library, leaving anything of the user's own intact.
+ *
+ * The subtlety: if someone owns a film the demo also seeded — Arrival, Heat,
+ * Breaking Bad are all likely — the scanner attaches their real file to the
+ * same title row. Deleting that row cascades to media_files and would take
+ * their own library entry with it. So titles are only removed once nothing
+ * but demo files pointed at them.
+ */
 function clearDemo() {
-  const rows = db.prepare("SELECT id FROM titles WHERE tmdb_id IS NULL OR metadata_state = 'demo'").all();
-  const files = db.prepare("SELECT id, title_id FROM media_files WHERE path LIKE ?").all(`${DEMO_DIR}%`);
-  const titleIds = new Set(files.map((f) => f.title_id));
+  const demoFiles = db.prepare('SELECT id, title_id FROM media_files WHERE path LIKE ?').all(`${DEMO_DIR}%`);
+  const touchedTitles = [...new Set(demoFiles.map((f) => f.title_id).filter(Boolean))];
 
   db.prepare('DELETE FROM media_files WHERE path LIKE ?').run(`${DEMO_DIR}%`);
-  for (const id of titleIds) db.prepare('DELETE FROM titles WHERE id = ?').run(id);
+
+  let removed = 0;
+  const kept = [];
+  for (const id of touchedTitles) {
+    const remaining = db.prepare('SELECT COUNT(*) AS n FROM media_files WHERE title_id = ?').get(id).n;
+    if (remaining === 0) {
+      db.prepare('DELETE FROM titles WHERE id = ?').run(id);
+      removed += 1;
+    } else {
+      const title = db.prepare('SELECT title FROM titles WHERE id = ?').get(id);
+      if (title) kept.push(title.title);
+    }
+  }
+
+  // Episodes and seasons whose files have gone.
+  db.exec(`
+    DELETE FROM episodes WHERE id NOT IN (SELECT episode_id FROM media_files WHERE episode_id IS NOT NULL);
+    DELETE FROM seasons WHERE id NOT IN (SELECT season_id FROM episodes WHERE season_id IS NOT NULL);
+  `);
 
   if (fs.existsSync(DEMO_DIR)) fs.rmSync(DEMO_DIR, { recursive: true, force: true });
-  console.log(`Removed ${titleIds.size} demo titles.`);
+
+  console.log(`\nRemoved ${removed} demo title${removed === 1 ? '' : 's'}.`);
+  if (kept.length) {
+    console.log(`\nKept ${kept.length} you also own, now showing only your own files:`);
+    for (const name of kept) console.log(`  · ${name}`);
+    console.log('\nRun `npm run scan` to refresh their details from your files.');
+  }
+
+  const left = db.prepare('SELECT COUNT(*) AS n FROM media_files').get().n;
+  console.log(`\n${left} file${left === 1 ? '' : 's'} left in your library — all your own.\n`);
 }
 
 function stubFile(relPath) {
