@@ -101,6 +101,14 @@ public class MainActivity extends Activity {
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        // Some Fire OS builds otherwise boost font/layout scale for
+        // "readability," which is exactly what pushes hero content taller
+        // than the screen. Pin it to 1:1 so CSS pixels mean what they say.
+        settings.setTextZoom(100);
+        webView.setInitialScale(100);
+        // The page's only signal that it's running here, not in a browser
+        // — see index.html's inline detector script.
+        settings.setUserAgentString(settings.getUserAgentString() + " ECLIPSE-TV/1.0");
         webView.setBackgroundColor(0xFF08080C);
 
         webView.setWebViewClient(new WebViewClient() {

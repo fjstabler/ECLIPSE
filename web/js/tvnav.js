@@ -1,16 +1,38 @@
 /**
  * Grid-based remote navigation.
  *
- * A generic "focus whatever's nearest in that direction" search feels like
- * steering a mouse cursor with a D-pad — it can drift diagonally and land on
- * the wrong thing. Real ten-foot interfaces (Netflix, Fire TV's own apps)
- * use a stricter model: Left/Right move along the current shelf and never
- * change row; Up/Down jump to the shelf above/below and land on whichever
- * card lines up best horizontally. This builds that grid fresh on every
- * keypress from actual layout — no per-page bookkeeping to keep in sync.
+ * Three things make a D-pad feel like a D-pad instead of a mouse dragged
+ * across the screen:
  *
- * Enter/Space need nothing extra: the focused element is a real <button> or
- * <a>, and browsers already activate those on Enter or Space.
+ * 1. Movement is instant. `scrollIntoView({behavior: 'auto'})` sounds like
+ *    "no animation," but per spec 'auto' means "do whatever the element's
+ *    CSS `scroll-behavior` says" — and .row__track sets `scroll-behavior:
+ *    smooth` on purpose, for mouse users clicking the paging arrows. Under
+ *    a remote's key-repeat that same smooth animation stacks call after
+ *    call, each one interrupting the last, which is exactly what turns a
+ *    crisp row of hops into the laggy, drifting scroll the fix request
+ *    described. `behavior: 'instant'` is the only value that actually
+ *    overrides the CSS and snaps immediately.
+ *
+ * 2. Rows are built from document-relative position, not viewport-relative
+ *    position. The nav bar is `position: fixed`, so getBoundingClientRect()
+ *    always reports it at roughly y=0–68 no matter how far the page has
+ *    scrolled — which meant that at just the right scroll offset, the nav's
+ *    band would coincidentally overlap whatever scrolled content also
+ *    landed near y=0 and the two would get clustered into one row. Once
+ *    that happened, "up" had nowhere left to go — the nav had stopped being
+ *    its own row — and the cursor would just stick. Treating the nav as
+ *    permanently at the top of the document (it visually is, from the
+ *    user's point of view) and everything else at its real scrolled
+ *    position fixes that at the source.
+ *
+ * 3. Activation doesn't depend on the browser's native "Enter clicks the
+ *    focused button" behavior. That behavior needs Android's hardware
+ *    focus and the DOM's focus to agree about which element is current,
+ *    and in an Android WebView driven by JS-called .focus() those two can
+ *    drift apart — which is what "some play buttons don't work" looks
+ *    like from the sofa. So this tracks its own cursor and clicks it
+ *    directly on Enter, never relying on the browser to do that step.
  */
 
 // The shelf paging arrows are a mouse-hover convenience (invisible until
@@ -20,16 +42,26 @@ const FOCUSABLE = 'a[href], button:not([disabled]):not(.row__arrow), [tabindex]:
 
 const OVERLAP_SLACK = 2; // px — rows whose bands just graze each other still count as separate
 
+let cursor = null;
+
 function isVisible(el) {
   if (!el || el.disabled) return false;
+  if (el.offsetParent === null && getComputedStyle(el).position !== 'fixed') return false;
   const rect = el.getBoundingClientRect();
-  if (rect.width === 0 && rect.height === 0) return false;
-  const style = getComputedStyle(el);
-  return style.visibility !== 'hidden' && style.display !== 'none';
+  return rect.width > 0 || rect.height > 0;
 }
 
 function candidates() {
   return Array.from(document.querySelectorAll(FOCUSABLE)).filter(isVisible);
+}
+
+/** Position used for row clustering — real document position, except the
+ * fixed nav, which is pinned to the top of every row calculation because
+ * that's where it always visually is, regardless of scroll offset. */
+function trackPosition(el) {
+  const rect = el.getBoundingClientRect();
+  if (el.closest('.nav')) return rect;
+  return { top: rect.top + window.scrollY, bottom: rect.bottom + window.scrollY, left: rect.left, width: rect.width };
 }
 
 function overlapsVertically(a, b) {
@@ -39,7 +71,7 @@ function overlapsVertically(a, b) {
 /** Cluster elements into visual rows by shared vertical space, left-to-right within each. */
 function groupIntoRows(elements) {
   const items = elements
-    .map((el) => ({ el, rect: el.getBoundingClientRect() }))
+    .map((el) => ({ el, rect: trackPosition(el) }))
     .sort((a, b) => a.rect.top - b.rect.top);
 
   const rows = [];
@@ -75,10 +107,24 @@ function nearestByX(items, x) {
   return best?.el || null;
 }
 
-function focus(el) {
-  if (!el) return;
-  el.focus({ preventScroll: true });
-  el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+function setCursor(el) {
+  if (!el || el === cursor) return;
+  if (cursor) cursor.classList.remove('tv-cursor');
+  cursor = el;
+  cursor.classList.add('tv-cursor');
+  // .focus() is still worth calling — real keyboards get a real :focus-visible
+  // ring from it, and screen readers get a real focus event — but nothing
+  // here depends on it succeeding. Activation goes through `cursor` instead.
+  try { cursor.focus({ preventScroll: true }); } catch { /* not focusable is fine, it's still clickable */ }
+
+  // scrollIntoView is a no-op on a position:fixed element — it's always
+  // technically "in view" regardless of page scroll — so reaching the nav
+  // needs an explicit scroll back to the top instead.
+  if (cursor.closest('.nav')) {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  } else {
+    cursor.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+  }
 }
 
 function moveFocus(key) {
@@ -86,9 +132,10 @@ function moveFocus(key) {
   if (!all.length) return;
   const rows = groupIntoRows(all);
 
-  const pos = document.activeElement ? findPosition(rows, document.activeElement) : null;
+  const currentEl = cursor && all.includes(cursor) ? cursor : document.activeElement;
+  const pos = currentEl ? findPosition(rows, currentEl) : null;
   if (!pos) {
-    focus(rows[0]?.items[0]?.el);
+    setCursor(rows[0]?.items[0]?.el);
     return;
   }
 
@@ -96,42 +143,65 @@ function moveFocus(key) {
   const row = rows[r];
 
   if (key === 'ArrowLeft') {
-    focus(row.items[idx - 1]?.el);
+    setCursor(row.items[idx - 1]?.el);
   } else if (key === 'ArrowRight') {
-    focus(row.items[idx + 1]?.el);
+    setCursor(row.items[idx + 1]?.el);
   } else {
     const targetRow = rows[r + (key === 'ArrowUp' ? -1 : 1)];
     if (!targetRow) return;
     const currentX = row.items[idx].rect.left + row.items[idx].rect.width / 2;
-    focus(nearestByX(targetRow.items, currentX));
+    setCursor(nearestByX(targetRow.items, currentX));
   }
 }
 
 function focusFirstIfNeeded() {
   requestAnimationFrame(() => {
-    const active = document.activeElement;
-    if (active && active !== document.body && document.contains(active) && isVisible(active)) return;
+    if (cursor && document.contains(cursor) && isVisible(cursor)) return;
+    if (cursor) cursor.classList.remove('tv-cursor');
+    cursor = null;
     const all = candidates();
-    if (all.length) all[0].focus({ preventScroll: true });
+    if (all.length) setCursor(groupIntoRows(all)[0]?.items[0]?.el || all[0]);
   });
 }
 
 const ARROWS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+const ACTIVATE_KEYS = new Set(['Enter', ' ']);
 
 export function initTvNav() {
   document.addEventListener('keydown', (e) => {
-    if (!ARROWS.has(e.key)) return;
-    if (document.querySelector('.player')) return; // the player owns arrows for seek/volume
+    if (document.querySelector('.player')) return; // the player owns arrows/enter for seek/volume/play
 
     const typing = e.target.matches('input, textarea, select, [contenteditable]');
-    // Left/right still move the text cursor while typing; up/down do nothing
-    // in a single-line field, so they're free to move focus instead.
-    if (typing && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return;
 
-    e.preventDefault();
-    moveFocus(e.key);
+    if (ARROWS.has(e.key)) {
+      // Left/right still move the text cursor while typing; up/down do
+      // nothing in a single-line field, so they're free to move focus.
+      if (typing && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return;
+      e.preventDefault();
+      moveFocus(e.key);
+      return;
+    }
+
+    if (ACTIVATE_KEYS.has(e.key) && !typing && cursor && document.contains(cursor)) {
+      e.preventDefault();
+      cursor.click();
+    }
   });
 
   window.addEventListener('hashchange', focusFirstIfNeeded);
+  // A click (mouse, touch, or a real Tab focus) should also become the
+  // cursor, so the two ways of pointing at something never disagree.
+  document.addEventListener(
+    'focusin',
+    (e) => {
+      if (e.target.matches(FOCUSABLE) && e.target !== cursor) {
+        if (cursor) cursor.classList.remove('tv-cursor');
+        cursor = e.target;
+        cursor.classList.add('tv-cursor');
+      }
+    },
+    true
+  );
+
   focusFirstIfNeeded();
 }

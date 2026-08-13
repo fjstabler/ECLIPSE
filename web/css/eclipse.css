@@ -65,9 +65,14 @@ img { max-width: 100%; display: block; }
 button, input, textarea, select { font: inherit; color: inherit; }
 a { color: inherit; text-decoration: none; }
 
-/* Visible enough to spot from a sofa with a remote — cards define their own
-   glow instead (see .card:focus-visible) and win on specificity. */
-a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
+/* Visible enough to spot from a sofa with a remote. .tv-cursor is the
+   navigation cursor tvnav.js owns and guarantees — it doesn't depend on the
+   browser's native focus-visible heuristics agreeing about what's current,
+   which is the thing that can't be relied on in an Android WebView. Cards
+   define their own glow instead (see .card:focus-visible) and win on
+   specificity. */
+a:focus-visible, button:focus-visible, [tabindex]:focus-visible,
+a.tv-cursor, button.tv-cursor, [tabindex].tv-cursor {
   outline: 2px solid var(--corona-1);
   outline-offset: 3px;
   border-radius: 8px;
@@ -309,8 +314,10 @@ a:focus-visible, button:focus-visible, [tabindex]:focus-visible {
   transition: transform 0.28s var(--ease), z-index 0s;
   border: 0; padding: 0; background: none; text-align: left;
 }
-.card:hover, .card:focus-visible { transform: scale(1.07) translateY(-4px); z-index: 20; outline: none; }
-.card:focus-visible .card__art { box-shadow: 0 0 0 2px var(--corona-1), var(--shadow-card); }
+.card:hover, .card:focus-visible, .card.tv-cursor { transform: scale(1.07) translateY(-4px); z-index: 20; outline: none; }
+.card:focus-visible .card__art, .card.tv-cursor .card__art { box-shadow: 0 0 0 2px var(--corona-1), var(--shadow-card); }
+.card.tv-cursor .card__overlay { opacity: 1; }
+.card.tv-cursor .card__play { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 
 .card__art {
   position: relative; aspect-ratio: 2 / 3; border-radius: var(--radius);
@@ -730,3 +737,60 @@ textarea.input { height: auto; min-height: 96px; padding: 12px 15px; line-height
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+/* ===================== TV mode (Fire TV shell) =====================
+   Applied only inside the native Fire TV app (see index.html's inline
+   detector script) — a phone or desktop browser never sees any of this.
+
+   Two different problems, two different fixes:
+
+   1. Layout. The hero is sized and bottom-anchored for a browser window;
+      on a TV viewport that's shorter than expected, the top of the title
+      can render above y=0 and get clipped by the screen edge — exactly
+      the "media bar doesn't fully show" report. Everything below shrinks
+      the hero and its content so it comfortably fits above the fold with
+      real margin to spare, plus a wider safe-area gutter so nothing sits
+      flush against an edge.
+
+   2. Performance. backdrop-filter (blur) is one of the most expensive
+      things a GPU can be asked to do every frame, and a Fire TV Stick's
+      GPU is a fraction of a desktop's. The nav bar blurs on every scroll
+      frame while stuck; the full-screen search overlay blurs a whole
+      1080p+ frame. Both get swapped for a plain, cheap, opaque background
+      that looks nearly identical from a sofa. */
+
+.tv-mode {
+  --gutter: clamp(32px, 5vw, 84px);
+}
+
+.tv-mode .page { padding-top: 18px; padding-bottom: 56px; }
+.tv-mode .row { margin-bottom: clamp(22px, 2.6vw, 36px); }
+
+.tv-mode .hero {
+  min-height: min(50vh, 500px);
+  margin-bottom: -28px;
+}
+.tv-mode .hero__media img, .tv-mode .hero__body {
+  animation: none; opacity: 1; transform: none;
+}
+.tv-mode .hero__body { max-width: min(560px, 86%); }
+.tv-mode .hero__logo { max-height: 84px; margin-bottom: 12px; }
+.tv-mode .hero__title { font-size: clamp(28px, 4.4vw, 48px); margin-bottom: 10px; }
+.tv-mode .hero__meta { margin-bottom: 10px; }
+.tv-mode .hero__overview { -webkit-line-clamp: 2; margin-bottom: 18px; }
+.tv-mode .hero__nova { margin-top: 14px; }
+
+/* Every backdrop-filter in the app, replaced with an equivalent solid fill. */
+.tv-mode .nav.is-stuck { backdrop-filter: none; background: rgba(8, 8, 12, 0.97); }
+.tv-mode .btn--ghost { backdrop-filter: none; background: rgba(255, 255, 255, 0.16); }
+.tv-mode .badge { backdrop-filter: none; background: rgba(8, 8, 12, 0.94); }
+.tv-mode .searchbar { backdrop-filter: none; background: rgba(5, 5, 8, 0.98); }
+.tv-mode .scrim { backdrop-filter: none; }
+.tv-mode .player__next { backdrop-filter: none; background: rgba(16, 16, 24, 0.98); }
+.tv-mode .auth__card { backdrop-filter: none; background: rgba(16, 16, 24, 0.97); }
+
+/* The instant scroll tvnav.js uses per-hop already avoids the drift a hold
+   would otherwise cause; matching it here means a click-and-hold anywhere
+   else (the row's own paging arrows, a mouse in Downloader's built-in
+   browser) doesn't feel inconsistent with everything else on screen. */
+.tv-mode .row__track { scroll-behavior: auto; }
