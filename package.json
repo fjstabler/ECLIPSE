@@ -1,0 +1,26 @@
+{
+  "name": "eclipse",
+  "version": "1.0.0",
+  "description": "ECLIPSE — a self-hosted streaming service for your home network, with NOVA recommendations.",
+  "type": "module",
+  "main": "server/index.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "scan": "node scripts/scan.js",
+    "demo": "node scripts/seed-demo.js",
+    "reset": "node scripts/reset.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.68.0",
+    "better-sqlite3": "^11.7.0",
+    "chokidar": "^4.0.3",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  },
+  "license": "MIT"
+}

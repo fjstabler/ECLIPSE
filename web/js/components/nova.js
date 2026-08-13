@@ -1,0 +1,217 @@
+import { el, icon, clear, miniMarkdown } from '../ui.js';
+import { api, novaChat } from '../api.js';
+import { Card } from './card.js';
+
+/**
+ * NOVA's chat panel. Slides in from the right and streams replies token by
+ * token, showing which tool it is using while it thinks.
+ */
+
+let panel = null;
+let scrim = null;
+let logNode = null;
+let inputNode = null;
+let sendBtn = null;
+let busy = false;
+let loaded = false;
+
+const STARTERS = [
+  'What should I watch tonight?',
+  "Something short and funny — I've got 90 minutes",
+  'Find me a series to start this weekend',
+  "I loved the last thing I watched. What's next?",
+];
+
+export function initNova() {
+  if (panel) return;
+
+  scrim = el('div', { class: 'scrim', onClick: () => closeNova() });
+
+  logNode = el('div', { class: 'nova__log' });
+
+  inputNode = el('textarea', {
+    class: 'nova__input',
+    rows: '1',
+    placeholder: 'Ask NOVA what to watch…',
+    onInput: (e) => {
+      e.target.style.height = 'auto';
+      e.target.style.height = `${Math.min(e.target.scrollHeight, 140)}px`;
+      sendBtn.disabled = busy || !e.target.value.trim();
+    },
+    onKeydown: (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        send();
+      }
+    },
+  });
+
+  sendBtn = el('button', { class: 'nova__send', type: 'button', disabled: true, 'aria-label': 'Send', onClick: () => send() }, icon('send'));
+
+  panel = el(
+    'aside',
+    { class: 'nova', 'aria-label': 'NOVA' },
+    el(
+      'div',
+      { class: 'nova__head' },
+      el('span', { class: 'nova-orb' }),
+      el(
+        'div',
+        { class: 'nova__title' },
+        el('p', { class: 'nova__name' }, 'NOVA'),
+        el('p', { class: 'nova__sub' }, 'Your curator')
+      ),
+      el('button', {
+        class: 'iconbtn', type: 'button', 'aria-label': 'Clear conversation', title: 'Clear conversation',
+        onClick: async () => { await api.novaClear(); renderEmpty(); },
+      }, el('span', { html: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/></svg>' })),
+      el('button', { class: 'iconbtn', type: 'button', 'aria-label': 'Close', onClick: () => closeNova() }, icon('close'))
+    ),
+    logNode,
+    el('div', { class: 'nova__compose' }, inputNode, sendBtn)
+  );
+
+  document.body.append(scrim, panel);
+  renderEmpty();
+}
+
+export async function openNova(seed) {
+  initNova();
+  panel.classList.add('is-open');
+  scrim.classList.add('is-open');
+
+  if (!loaded) {
+    loaded = true;
+    try {
+      const { messages } = await api.novaConversation();
+      if (messages.length) {
+        clear(logNode);
+        for (const m of messages) {
+          appendMessage(m.role === 'user' ? 'user' : 'nova', m.content, m.refs);
+        }
+        scrollToEnd();
+      }
+    } catch { /* keep the empty state */ }
+  }
+
+  if (seed) {
+    inputNode.value = seed;
+    sendBtn.disabled = false;
+    send();
+  } else {
+    setTimeout(() => inputNode.focus(), 380);
+  }
+}
+
+export function closeNova() {
+  if (!panel) return;
+  panel.classList.remove('is-open');
+  scrim.classList.remove('is-open');
+}
+
+export function toggleNova() {
+  if (panel?.classList.contains('is-open')) closeNova();
+  else openNova();
+}
+
+function renderEmpty() {
+  clear(logNode);
+  logNode.append(
+    el(
+      'div',
+      { class: 'nova__empty' },
+      el('div', { class: 'nova__orb-lg' }),
+      el('h3', {}, 'What are you in the mood for?'),
+      el('p', {}, 'I know everything on this server and what you have been watching. Tell me the mood, the time you have, or just ask.'),
+      el(
+        'div',
+        { class: 'nova__starters' },
+        STARTERS.map((s) =>
+          el('button', { class: 'nova__starter', type: 'button', onClick: () => { inputNode.value = s; send(); } }, s)
+        )
+      )
+    )
+  );
+}
+
+function appendMessage(role, content, refs = []) {
+  const bubble = el('div', { class: 'msg__bubble', html: miniMarkdown(content) });
+  const msg = el('div', { class: `msg msg--${role}` }, bubble);
+
+  if (refs?.length) {
+    const cards = el('div', { class: 'msg__cards' }, refs.map((t) => Card(t)));
+    msg.append(cards);
+  }
+  logNode.append(msg);
+  return { msg, bubble };
+}
+
+function scrollToEnd() {
+  logNode.scrollTop = logNode.scrollHeight;
+}
+
+async function send() {
+  const text = inputNode.value.trim();
+  if (!text || busy) return;
+
+  busy = true;
+  sendBtn.disabled = true;
+  inputNode.value = '';
+  inputNode.style.height = 'auto';
+
+  // First message replaces the empty state.
+  if (logNode.querySelector('.nova__empty')) clear(logNode);
+
+  appendMessage('user', text);
+  scrollToEnd();
+
+  const { msg, bubble } = appendMessage('nova', '');
+  const toolLine = el('div', { class: 'msg__tool' }, 'Thinking…');
+  msg.insertBefore(toolLine, bubble);
+  scrollToEnd();
+
+  let buffer = '';
+
+  try {
+    await novaChat(text, (event) => {
+      switch (event.type) {
+        case 'text':
+          buffer += event.text;
+          bubble.innerHTML = miniMarkdown(buffer);
+          toolLine.remove();
+          scrollToEnd();
+          break;
+        case 'tool':
+          toolLine.textContent = event.label || 'Working…';
+          scrollToEnd();
+          break;
+        case 'refs':
+          if (event.titles?.length) {
+            msg.append(el('div', { class: 'msg__cards' }, event.titles.map((t) => Card(t))));
+            scrollToEnd();
+          }
+          break;
+        case 'error':
+          toolLine.remove();
+          bubble.innerHTML = miniMarkdown(event.message);
+          bubble.style.borderColor = 'rgba(255,90,104,0.35)';
+          break;
+        case 'done':
+          toolLine.remove();
+          if (!buffer && event.content) bubble.innerHTML = miniMarkdown(event.content);
+          break;
+        default:
+          break;
+      }
+    });
+  } catch (err) {
+    toolLine.remove();
+    bubble.textContent = `NOVA could not reply: ${err.message}`;
+  } finally {
+    toolLine.remove();
+    busy = false;
+    sendBtn.disabled = !inputNode.value.trim();
+    inputNode.focus();
+    scrollToEnd();
+  }
+}

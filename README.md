@@ -1,0 +1,281 @@
+<div align="center">
+
+# ECLIPSE
+
+**A private streaming service for your home network.**
+
+Drop films and series into a folder. ECLIPSE finds them, fetches the artwork and
+synopses, and serves them to every browser in the house — with NOVA, a curator
+that learns what each person actually likes.
+
+</div>
+
+---
+
+## What this is
+
+A replacement for Jellyfin that looks and feels like the streaming services you
+actually use, and knows your taste.
+
+- **Watched folders.** Point ECLIPSE at a directory. New files appear in the
+  library within seconds, no manual scan needed.
+- **Automatic metadata.** Posters, backdrops, synopses, cast, crew, certificates
+  and episode titles, pulled from TMDB and cached locally.
+- **A real streaming interface.** Hero banner, horizontal shelves, hover states,
+  a proper player with resume, next-episode and keyboard control.
+- **NOVA.** A recommendation engine that scores your whole library against your
+  taste, plus a conversational layer that can take "something short and funny,
+  I've got ninety minutes" and give you a real answer.
+- **Per-person profiles.** Everyone gets their own history, watchlist and taste
+  profile, so NOVA recommends to *them*, not to the household average.
+
+Version 1 runs in the browser. It's built to be judged and edited — no build
+step, no bundler, no framework. Change a colour in the CSS and refresh.
+
+---
+
+## Getting started
+
+```bash
+git clone https://github.com/fjstabler/ECLIPSE.git
+cd ECLIPSE
+npm install
+cp .env.example .env
+```
+
+Open `.env` and set your media folders:
+
+```bash
+ECLIPSE_MOVIES_DIR=/mnt/media/Films
+ECLIPSE_SERIES_DIR=/mnt/media/Series
+```
+
+Then:
+
+```bash
+npm start
+```
+
+Open the URL it prints. The first profile you create is the administrator.
+
+**Want to see the interface before wiring up real media?**
+
+```bash
+npm run demo      # seeds 12 films and 6 series
+npm run demo -- --clear   # removes them again
+```
+
+Demo titles are for judging the interface — the files are placeholders and
+won't play.
+
+---
+
+## How your files should be named
+
+ECLIPSE reads the same naming conventions Jellyfin and Plex do, including messy
+scene releases. Any of these work:
+
+```
+Films/
+  The Matrix (1999).mkv
+  The Matrix (1999)/The Matrix (1999) 2160p UHD BluRay x265-GRP.mkv
+  Blade.Runner.2049.2017.1080p.BluRay.x264-AMIABLE.mkv
+  Dune Part Two 2024 2160p WEB-DL DDP5.1 Atmos HDR H.265-FLUX.mkv
+
+Series/
+  Breaking Bad/Season 01/Breaking Bad - S01E01 - Pilot.mkv
+  Severance/Season 2/Severance.S02E03.Who.Is.Alive.1080p.ATVP.WEB-DL.mkv
+  The Office/Season 03/The Office - 3x05 - Initiation.avi
+  Doctor Who/Specials/Doctor Who - S00E01 - The Star Beast.mkv
+  Firefly/Firefly.S01E01E02.Serenity.mkv
+```
+
+Quality tags, codecs, release groups and language markers are stripped
+automatically. A year in the title is handled correctly — *Blade Runner 2049*,
+*1917* and *2012* all resolve to the right film.
+
+Subtitles sitting next to a video are picked up too:
+`Arrival (2016).en.srt`, `Arrival (2016).eng.forced.srt`.
+
+---
+
+## Playback
+
+Browsers play `.mp4`, `.m4v` and `.webm` directly, with proper seeking via HTTP
+range requests.
+
+For `.mkv` and other containers the browser can't open, ECLIPSE remuxes on the
+fly if **ffmpeg** is installed — copying the video stream where possible so it's
+cheap enough to run on a NAS. If a direct play fails, the player falls back to
+the converted stream by itself.
+
+```bash
+# Debian/Ubuntu
+sudo apt install ffmpeg
+# macOS
+brew install ffmpeg
+```
+
+Without ffmpeg, `.mkv` files appear in the library but won't play. Set
+`ECLIPSE_TRANSCODE=false` to disable conversion entirely.
+
+**Player keyboard shortcuts**
+
+| Key | Action | Key | Action |
+|---|---|---|---|
+| `Space` / `K` | Play or pause | `F` | Fullscreen |
+| `←` / `→` | Skip 10 seconds | `M` | Mute |
+| `↑` / `↓` | Volume | `C` | Cycle subtitles |
+| `Esc` | Close player | | |
+
+Elsewhere: `/` opens search, `N` toggles NOVA.
+
+---
+
+## NOVA
+
+NOVA works in two layers, and the first one needs no API key at all.
+
+### The engine (always on)
+
+A content-based recommender that builds a weighted taste vector from three
+signals — the profile you filled in, what you actually watched, and how you
+rated it — then scores every unwatched title in your library against it.
+
+It's deliberately content-based rather than collaborative: a home server has one
+household on it, so there's nobody to collaborate with. What it does have is a
+lot of signal about a few people, which is exactly what this approach needs.
+
+Every recommendation comes with the reason it scored well:
+
+> **Arrival** (2016) — *Because you like Science Fiction and Drama, directed by
+> Denis Villeneuve.*
+
+Thumbs up and down on any title feed straight back in. So does finishing
+something, which counts for more than starting it.
+
+### The conversation (needs an Anthropic API key)
+
+Add `ANTHROPIC_API_KEY` to `.env` and the NOVA panel becomes a conversation.
+It reaches your library through a fixed set of tools — searching, scoring,
+finding similar titles, reading your history — so **it can only ever recommend
+things that are actually on your server**. It can't hallucinate a film you don't
+own.
+
+It also writes back. Tell it "I can't stand gore" and it records that in your
+taste profile, and the next session starts from it.
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-...
+NOVA_MODEL=claude-opus-5
+NOVA_EFFORT=medium        # low | medium | high | xhigh | max
+```
+
+Without the key, asking NOVA a question still returns real recommendations from
+the engine — just without the back-and-forth.
+
+---
+
+## Metadata
+
+A free [TMDB API key](https://www.themoviedb.org/settings/api) gets you posters,
+backdrops, synopses, cast, crew and episode titles. Set `TMDB_API_KEY` in
+`.env`.
+
+Without it, ECLIPSE derives titles and years from filenames and generates its
+own artwork — deterministic gradient posters, so the same film always looks the
+same. Everything works; it just looks plainer.
+
+Artwork is cached to disk, so the interface stays fast and keeps working if TMDB
+is unreachable.
+
+---
+
+## Configuration
+
+Everything lives in `.env`. See `.env.example` for the annotated list. The ones
+that matter:
+
+| Variable | What it does |
+|---|---|
+| `ECLIPSE_MOVIES_DIR` | Folder(s) of films. Separate multiple with `:` |
+| `ECLIPSE_SERIES_DIR` | Folder(s) of series |
+| `TMDB_API_KEY` | Enables real artwork and metadata |
+| `ANTHROPIC_API_KEY` | Enables conversational NOVA |
+| `PORT` | Default `8383` |
+| `ECLIPSE_WATCH` | Watch folders for new files. Default `true` |
+| `ECLIPSE_TRANSCODE` | Allow ffmpeg conversion. Default `true` |
+
+---
+
+## Commands
+
+```bash
+npm start                 # run the server
+npm run dev               # run with auto-restart on file changes
+npm run scan              # scan the library by hand
+npm run scan -- --full    # re-read every file, ignoring the cache
+npm run demo              # seed a demo library
+npm run demo -- --clear   # remove it
+node scripts/selftest.js  # check the wiring, parser and engine
+```
+
+---
+
+## How it's built
+
+```
+server/
+  index.js          Express app and startup
+  config.js         Environment configuration
+  db.js  schema.sql SQLite, applied on boot
+  auth.js           Profiles, scrypt passwords, session cookies
+  library.js        The read model shared by the API and NOVA
+  util/parse.js     Filename → title, year, season, episode
+  scanner/          Library walk, ingestion, folder watching
+  metadata/         TMDB client and artwork caching
+  nova/
+    engine.js       The recommendation engine
+    tools.js        The tools NOVA can call
+    claude.js       The conversational layer
+  routes/           HTTP API
+web/
+  index.html        The whole client shell
+  css/eclipse.css   The design system
+  js/               ES modules, served straight from disk
+```
+
+**No build step.** The client is plain ES modules and CSS. Edit and refresh.
+
+**Design tokens** live at the top of `web/css/eclipse.css`. The palette is one
+gradient — violet through magenta to amber, the corona of an eclipse — over
+near-black surfaces. Change `--corona` and the whole app follows.
+
+---
+
+## Where this goes next
+
+Version 1 is deliberately a browser app so the interface can be judged and
+changed quickly. The obvious next steps:
+
+- Native apps wrapping the same API (the server is already a clean HTTP surface)
+- Hardware-accelerated transcoding and HLS for seeking within converted streams
+- Downloads for offline viewing
+- Chromecast / AirPlay
+- Live TV and DVR
+
+---
+
+## Security
+
+ECLIPSE is built for a home network. Passwords are hashed with scrypt and
+sessions are httpOnly cookies, but it is **not hardened for the public
+internet** — there's no rate limiting, no TLS, and no CSRF tokens. If you want
+to reach it from outside the house, put it behind a VPN or a reverse proxy that
+handles TLS and authentication.
+
+---
+
+## Licence
+
+MIT.
