@@ -198,16 +198,25 @@ public class MainActivity extends Activity {
             super.onBackPressed();
             return;
         }
-        if (webView.canGoBack()) {
-            webView.goBack();
-            return;
-        }
-        long now = System.currentTimeMillis();
-        if (now - backPressedAt < 2000) {
-            super.onBackPressed();
-        } else {
-            backPressedAt = now;
-            Toast.makeText(this, "Press back again to exit", Toast.LENGTH_SHORT).show();
-        }
+        // The player, search and N.O.V.A. are DOM overlays with no history
+        // entry of their own — a hardware Back press never reaches their
+        // keyboard Escape handlers, so ask the page directly whether it has
+        // something open to close before touching page history or exiting.
+        webView.evaluateJavascript(
+                "(function(){try{return !!(window.eclipseTvBack && window.eclipseTvBack());}catch(e){return false;}})();",
+                (String result) -> {
+                    if ("true".equals(result)) return;
+                    if (webView.canGoBack()) {
+                        webView.goBack();
+                        return;
+                    }
+                    long now = System.currentTimeMillis();
+                    if (now - backPressedAt < 2000) {
+                        super.onBackPressed();
+                    } else {
+                        backPressedAt = now;
+                        Toast.makeText(MainActivity.this, "Press back again to exit", Toast.LENGTH_SHORT).show();
+                    }
+                });
     }
 }

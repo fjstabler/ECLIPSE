@@ -114,6 +114,10 @@ export function toggleNova() {
   else openNova();
 }
 
+export function isNovaOpen() {
+  return Boolean(panel?.classList.contains('is-open'));
+}
+
 function renderEmpty() {
   clear(logNode);
   logNode.append(

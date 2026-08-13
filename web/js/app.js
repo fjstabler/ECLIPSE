@@ -8,7 +8,7 @@ import { BrowseView } from './views/browse.js';
 import { SettingsView } from './views/settings.js';
 import { AuthView } from './views/auth.js';
 import { openSearch, closeSearch, isSearchOpen } from './views/search.js';
-import { toggleNova, openNova, closeNova } from './components/nova.js';
+import { toggleNova, openNova, closeNova, isNovaOpen } from './components/nova.js';
 import { closePlayer } from './components/player.js';
 import { initTvNav } from './tvnav.js';
 
@@ -57,6 +57,23 @@ function mountShell() {
   bindGlobalKeys();
   bindScroll();
   initTvNav();
+  bindTvBack();
+}
+
+/**
+ * A TV remote's Back button isn't a keyboard Escape — there's no key event
+ * for the Fire TV app's WebView shell to forward, so the native side calls
+ * this directly to ask "is there an overlay you'd like to close first?"
+ * before it falls back to page history or exiting. Closing the player,
+ * search and N.O.V.A. are all safe to call even when that layer isn't open.
+ */
+function bindTvBack() {
+  window.eclipseTvBack = () => {
+    if (document.querySelector('.player')) { closePlayer(); return true; }
+    if (isSearchOpen()) { closeSearch(); return true; }
+    if (isNovaOpen()) { closeNova(); return true; }
+    return false;
+  };
 }
 
 function Nav() {
