@@ -21,7 +21,7 @@ router.get('/home', (req, res) => {
 
   rows.push(...homeRows(userId));
 
-  // The hero is the strongest NOVA pick with a backdrop to show behind it.
+  // The hero is the strongest N.O.V.A. pick with a backdrop to show behind it.
   const novaRow = rows.find((r) => r.id === 'for-you');
   const heroPool = (novaRow?.items || rows[0]?.items || []).filter((t) => t.backdrop);
   const hero = heroPool[0] ? library.getTitleDetail(heroPool[0].id, userId) : null;

@@ -115,7 +115,7 @@ function Nav() {
     el('div', { class: 'nav__tools' },
       el('button', { class: 'iconbtn', type: 'button', 'aria-label': 'Search', onClick: () => openSearch() }, icon('search')),
       el('button', { class: 'nav__nova', type: 'button', onClick: () => toggleNova() },
-        el('span', { class: 'nova-orb' }), 'NOVA'),
+        el('span', { class: 'nova-orb' }), 'N.O.V.A.'),
       el('div', { style: { position: 'relative' } }, avatar, menu))
   );
 
@@ -156,15 +156,22 @@ function bindScroll() {
 
 function bindGlobalKeys() {
   document.addEventListener('keydown', (e) => {
-    if (e.target.matches('input, textarea')) return;
     if (document.querySelector('.player')) return; // the player owns the keyboard
+
+    // Escape is a universal dismiss, so it has to work while typing — that's
+    // precisely when you want to shut the panel you're typing into.
+    if (e.key === 'Escape') {
+      if (isSearchOpen()) closeSearch();
+      else closeNova();
+      return;
+    }
+
+    // Everything else would collide with typing.
+    if (e.target.matches('input, textarea, [contenteditable]')) return;
 
     if (e.key === '/') {
       e.preventDefault();
       openSearch();
-    } else if (e.key === 'Escape') {
-      if (isSearchOpen()) closeSearch();
-      else closeNova();
     } else if (e.key.toLowerCase() === 'n' && !e.metaKey && !e.ctrlKey) {
       toggleNova();
     }

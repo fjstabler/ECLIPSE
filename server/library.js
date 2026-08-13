@@ -1,7 +1,7 @@
 import { db } from './db.js';
 
 /**
- * Shared read model for the library. Both the HTTP API and NOVA's tools go
+ * Shared read model for the library. Both the HTTP API and N.O.V.A.'s tools go
  * through here so they can never disagree about what's in the library.
  */
 

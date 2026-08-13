@@ -15,7 +15,7 @@ const MODULES = [
   '../server/metadata/artwork.js',
   '../server/nova/engine.js',
   '../server/nova/tools.js',
-  '../server/nova/claude.js',
+  '../server/nova/openai.js',
   '../server/routes/auth.routes.js',
   '../server/routes/library.routes.js',
   '../server/routes/stream.routes.js',

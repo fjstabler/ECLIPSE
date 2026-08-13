@@ -3,7 +3,7 @@ import { api, novaChat } from '../api.js';
 import { Card } from './card.js';
 
 /**
- * NOVA's chat panel. Slides in from the right and streams replies token by
+ * N.O.V.A.'s chat panel. Slides in from the right and streams replies token by
  * token, showing which tool it is using while it thinks.
  */
 
@@ -32,7 +32,7 @@ export function initNova() {
   inputNode = el('textarea', {
     class: 'nova__input',
     rows: '1',
-    placeholder: 'Ask NOVA what to watch…',
+    placeholder: 'Ask N.O.V.A. what to watch…',
     onInput: (e) => {
       e.target.style.height = 'auto';
       e.target.style.height = `${Math.min(e.target.scrollHeight, 140)}px`;
@@ -50,7 +50,7 @@ export function initNova() {
 
   panel = el(
     'aside',
-    { class: 'nova', 'aria-label': 'NOVA' },
+    { class: 'nova', 'aria-label': 'N.O.V.A.' },
     el(
       'div',
       { class: 'nova__head' },
@@ -58,7 +58,7 @@ export function initNova() {
       el(
         'div',
         { class: 'nova__title' },
-        el('p', { class: 'nova__name' }, 'NOVA'),
+        el('p', { class: 'nova__name' }, 'N.O.V.A.'),
         el('p', { class: 'nova__sub' }, 'Your curator')
       ),
       el('button', {
@@ -206,7 +206,7 @@ async function send() {
     });
   } catch (err) {
     toolLine.remove();
-    bubble.textContent = `NOVA could not reply: ${err.message}`;
+    bubble.textContent = `N.O.V.A. could not reply: ${err.message}`;
   } finally {
     toolLine.remove();
     busy = false;

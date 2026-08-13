@@ -4,8 +4,8 @@ import * as library from '../library.js';
 import { recommend, similarTo, tasteSummary, saveTasteProfile, getTasteProfile } from './engine.js';
 
 /**
- * The tools NOVA can call. Every one of them reads or writes the same data the
- * rest of ECLIPSE uses — NOVA can only ever talk about films that are actually
+ * The tools N.O.V.A. can call. Every one of them reads or writes the same data the
+ * rest of ECLIPSE uses — N.O.V.A. can only ever talk about films that are actually
  * on this server, which is the whole point.
  */
 
@@ -136,7 +136,7 @@ function clamp(n, min, max, fallback) {
 
 /**
  * Execute one tool call. Returns { result, refs } where refs are title ids the
- * UI should render as cards alongside NOVA's reply.
+ * UI should render as cards alongside N.O.V.A.'s reply.
  */
 export function runTool(name, input, ctx) {
   const { userId } = ctx;
@@ -267,7 +267,7 @@ export function runTool(name, input, ctx) {
   }
 }
 
-/** Context handed to NOVA up front so it doesn't have to ask for the basics. */
+/** Context handed to N.O.V.A. up front so it doesn't have to ask for the basics. */
 export function buildSystemPrompt(user) {
   const stats = library.libraryStats();
   const genres = library
@@ -277,7 +277,7 @@ export function buildSystemPrompt(user) {
     .join(', ');
   const profile = getTasteProfile(user.id);
 
-  return `You are NOVA, the resident film and television curator built into ECLIPSE — a private streaming server running on someone's home network.
+  return `You are N.O.V.A., the resident film and television curator built into ECLIPSE — a private streaming server running on someone's home network.
 
 You are talking to ${user.display_name}. This server holds ${stats.movies} film${stats.movies === 1 ? '' : 's'} and ${stats.series} series (${stats.episodes} episodes).${genres ? ` The genres present are: ${genres}.` : ''}
 

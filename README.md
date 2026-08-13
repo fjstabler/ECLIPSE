@@ -5,7 +5,7 @@
 **A private streaming service for your home network.**
 
 Drop films and series into a folder. ECLIPSE finds them, fetches the artwork and
-synopses, and serves them to every browser in the house — with NOVA, a curator
+synopses, and serves them to every browser in the house — with N.O.V.A., a curator
 that learns what each person actually likes.
 
 </div>
@@ -23,11 +23,11 @@ actually use, and knows your taste.
   and episode titles, pulled from TMDB and cached locally.
 - **A real streaming interface.** Hero banner, horizontal shelves, hover states,
   a proper player with resume, next-episode and keyboard control.
-- **NOVA.** A recommendation engine that scores your whole library against your
+- **N.O.V.A.** A recommendation engine that scores your whole library against your
   taste, plus a conversational layer that can take "something short and funny,
   I've got ninety minutes" and give you a real answer.
 - **Per-person profiles.** Everyone gets their own history, watchlist and taste
-  profile, so NOVA recommends to *them*, not to the household average.
+  profile, so N.O.V.A. recommends to *them*, not to the household average.
 
 Version 1 runs in the browser. It's built to be judged and edited — no build
 step, no bundler, no framework. Change a colour in the CSS and refresh.
@@ -128,13 +128,13 @@ Without ffmpeg, `.mkv` files appear in the library but won't play. Set
 | `↑` / `↓` | Volume | `C` | Cycle subtitles |
 | `Esc` | Close player | | |
 
-Elsewhere: `/` opens search, `N` toggles NOVA.
+Elsewhere: `/` opens search, `N` toggles N.O.V.A.
 
 ---
 
-## NOVA
+## N.O.V.A.
 
-NOVA works in two layers, and the first one needs no API key at all.
+N.O.V.A. works in two layers, and the first one needs no API key at all.
 
 ### The engine (always on)
 
@@ -154,25 +154,33 @@ Every recommendation comes with the reason it scored well:
 Thumbs up and down on any title feed straight back in. So does finishing
 something, which counts for more than starting it.
 
-### The conversation (needs an Anthropic API key)
+### The conversation (needs an OpenAI API key)
 
-Add `ANTHROPIC_API_KEY` to `.env` and the NOVA panel becomes a conversation.
-It reaches your library through a fixed set of tools — searching, scoring,
-finding similar titles, reading your history — so **it can only ever recommend
-things that are actually on your server**. It can't hallucinate a film you don't
-own.
+Add `OPENAI_API_KEY` to `.env` and the N.O.V.A. panel becomes a conversation.
+She reaches your library through a fixed set of tools — searching, scoring,
+finding similar titles, reading your history — so **she can only ever recommend
+things that are actually on your server**. She can't hallucinate a film you
+don't own.
 
-It also writes back. Tell it "I can't stand gore" and it records that in your
-taste profile, and the next session starts from it.
+She also writes back. Tell her "I can't stand gore" and it goes into your taste
+profile, and the next session starts from it.
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-...
-NOVA_MODEL=claude-opus-5
-NOVA_EFFORT=medium        # low | medium | high | xhigh | max
+OPENAI_API_KEY=sk-...
+NOVA_MODEL=gpt-4o
 ```
 
-Without the key, asking NOVA a question still returns real recommendations from
-the engine — just without the back-and-forth.
+Get a key at [platform.openai.com/api-keys](https://platform.openai.com/api-keys).
+It lives in `.env` on your own machine and is never sent to the browser — only
+the server talks to OpenAI. If the model you set isn't available to your
+account, N.O.V.A. says so in the chat panel and lists the ones that are.
+
+Because this uses the standard Chat Completions API, `OPENAI_BASE_URL` will
+point her at any OpenAI-compatible endpoint instead — LM Studio, Ollama,
+OpenRouter, or a model running on your own hardware.
+
+Without a key, asking N.O.V.A. a question still returns real recommendations
+from the engine — just without the back-and-forth.
 
 ---
 
@@ -201,7 +209,7 @@ that matter:
 | `ECLIPSE_MOVIES_DIR` | Folder(s) of films. Separate multiple with `:` |
 | `ECLIPSE_SERIES_DIR` | Folder(s) of series |
 | `TMDB_API_KEY` | Enables real artwork and metadata |
-| `ANTHROPIC_API_KEY` | Enables conversational NOVA |
+| `OPENAI_API_KEY` | Enables conversational N.O.V.A. |
 | `PORT` | Default `8383` |
 | `ECLIPSE_WATCH` | Watch folders for new files. Default `true` |
 | `ECLIPSE_TRANSCODE` | Allow ffmpeg conversion. Default `true` |
@@ -220,6 +228,18 @@ npm run demo -- --clear   # remove it
 node scripts/selftest.js  # check the wiring, parser and engine
 ```
 
+Testing N.O.V.A.'s conversation without spending anything on API calls:
+
+```bash
+node scripts/mock-openai.js &        # a stand-in OpenAI server
+OPENAI_API_KEY=test OPENAI_BASE_URL=http://localhost:8399/v1 \
+  NOVA_MODEL=mock-model node scripts/nova-probe.js "something short and funny"
+```
+
+`nova-probe.js` also works against a real key — drop the `OPENAI_BASE_URL` — and
+prints the tools she called and the reply she streamed, which is the quickest
+way to see whether a model behaves well before wiring it into the UI.
+
 ---
 
 ## How it's built
@@ -230,14 +250,14 @@ server/
   config.js         Environment configuration
   db.js  schema.sql SQLite, applied on boot
   auth.js           Profiles, scrypt passwords, session cookies
-  library.js        The read model shared by the API and NOVA
+  library.js        The read model shared by the API and N.O.V.A.
   util/parse.js     Filename → title, year, season, episode
   scanner/          Library walk, ingestion, folder watching
   metadata/         TMDB client and artwork caching
   nova/
     engine.js       The recommendation engine
-    tools.js        The tools NOVA can call
-    claude.js       The conversational layer
+    tools.js        The tools N.O.V.A. can call
+    openai.js       The conversational layer
   routes/           HTTP API
 web/
   index.html        The whole client shell

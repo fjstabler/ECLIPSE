@@ -1,6 +1,6 @@
 import express from 'express';
 import { requireAuth } from '../auth.js';
-import { streamNova, getConversation, clearConversation, novaAvailable } from '../nova/claude.js';
+import { streamNova, getConversation, clearConversation, novaAvailable } from '../nova/openai.js';
 import { tasteSummary } from '../nova/engine.js';
 
 export const router = express.Router();
@@ -20,14 +20,14 @@ router.delete('/conversation', (req, res) => {
 });
 
 /**
- * Chat with NOVA over Server-Sent Events.
+ * Chat with N.O.V.A. over Server-Sent Events.
  *
  * SSE rather than WebSockets: the traffic is one-directional once the message
  * is sent, and it survives a reverse proxy without extra configuration.
  */
 router.post('/chat', async (req, res) => {
   const message = String(req.body?.message || '').trim();
-  if (!message) return res.status(400).json({ error: 'Say something to NOVA first' });
+  if (!message) return res.status(400).json({ error: 'Say something to N.O.V.A. first' });
   if (message.length > 4000) return res.status(400).json({ error: 'That message is too long' });
 
   res.writeHead(200, {
@@ -38,19 +38,23 @@ router.post('/chat', async (req, res) => {
   });
   res.write(': connected\n\n');
 
-  let closed = false;
-  req.on('close', () => {
-    closed = true;
+  // Listen on the *response*, not the request. Once express.json() has read the
+  // body to the end, the request stream is destroyed and emits 'close' straight
+  // away — using that as a disconnect signal silences the whole reply and the
+  // response never ends, so the panel hangs forever.
+  let clientGone = false;
+  res.on('close', () => {
+    clientGone = true;
   });
 
   const emit = (event) => {
-    if (closed) return;
+    if (clientGone || res.writableEnded) return;
     res.write(`data: ${JSON.stringify(event)}\n\n`);
   };
 
   // Some proxies drop an idle connection; a comment every 15s keeps it open.
   const heartbeat = setInterval(() => {
-    if (!closed) res.write(': ping\n\n');
+    if (!clientGone && !res.writableEnded) res.write(': ping\n\n');
   }, 15000);
 
   try {
@@ -59,6 +63,6 @@ router.post('/chat', async (req, res) => {
     emit({ type: 'error', message: err.message });
   } finally {
     clearInterval(heartbeat);
-    if (!closed) res.end();
+    if (!res.writableEnded) res.end();
   }
 });

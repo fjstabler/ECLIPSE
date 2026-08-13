@@ -6,7 +6,7 @@ import { config } from '../config.js';
 import { runScan, scanStatus } from '../scanner/scanner.js';
 import { libraryStats, listTitles } from '../library.js';
 import { hasTmdb } from '../metadata/tmdb.js';
-import { novaAvailable } from '../nova/claude.js';
+import { novaAvailable } from '../nova/openai.js';
 
 export const router = express.Router();
 router.use(requireAdmin);

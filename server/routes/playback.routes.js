@@ -8,7 +8,7 @@ router.use(requireAuth);
 
 /**
  * The player posts progress every few seconds. This is what powers
- * "Continue watching" and, just as importantly, what teaches NOVA which
+ * "Continue watching" and, just as importantly, what teaches N.O.V.A. which
  * things actually got finished.
  */
 router.post('/progress', (req, res) => {

@@ -157,10 +157,11 @@ router.get('/transcode/:fileId', requireAuth, (req, res) => {
 
   // Stop encoding the moment the viewer navigates away — otherwise a skipped
   // episode keeps a CPU core busy until ffmpeg reaches the end of the file.
+  // Watch the response only: a request stream can be destroyed (and emit
+  // 'close') as soon as it has been read, which would kill ffmpeg immediately.
   const cleanup = () => {
     if (!ff.killed) ff.kill('SIGKILL');
   };
-  req.on('close', cleanup);
   res.on('close', cleanup);
 
   ff.stdout.pipe(res);

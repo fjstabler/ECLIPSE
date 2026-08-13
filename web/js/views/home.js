@@ -77,7 +77,7 @@ function Hero(title) {
               textDecoration: 'underline', padding: 0, font: 'inherit', fontWeight: '600',
             },
             onClick: () => openNova('What should I watch tonight?'),
-          }, 'Ask NOVA for something else')
+          }, 'Ask N.O.V.A. for something else')
         )
       )
     )

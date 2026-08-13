@@ -47,7 +47,7 @@ export async function TitleView({ params, outlet }) {
           e.currentTarget.style.background = 'var(--corona)';
           e.currentTarget.style.borderColor = 'transparent';
         }
-        toast(next === 1 ? 'NOVA will find more like this' : next === -1 ? 'NOVA will show you fewer like this' : 'Rating cleared');
+        toast(next === 1 ? 'N.O.V.A. will find more like this' : next === -1 ? 'N.O.V.A. will show you fewer like this' : 'Rating cleared');
       },
     }, icon(iconName));
 

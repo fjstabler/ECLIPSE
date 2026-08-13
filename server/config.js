@@ -42,12 +42,15 @@ export const config = {
     imageBase: 'https://image.tmdb.org/t/p',
   },
 
-  // NOVA's conversational layer. Without a key NOVA still recommends using the
-  // local scoring engine; it just can't hold a conversation about it.
+  // N.O.V.A.'s conversational layer, on the OpenAI API. Without a key she still
+  // recommends using the local scoring engine; she just can't talk about it.
+  //
+  // baseUrl lets you point at any OpenAI-compatible endpoint instead — a local
+  // model via LM Studio or Ollama, OpenRouter, and so on.
   nova: {
-    apiKey: process.env.ANTHROPIC_API_KEY || '',
-    model: process.env.NOVA_MODEL || 'claude-opus-5',
-    effort: process.env.NOVA_EFFORT || 'medium',
+    apiKey: process.env.OPENAI_API_KEY || '',
+    model: process.env.NOVA_MODEL || 'gpt-4o',
+    baseUrl: process.env.OPENAI_BASE_URL || '',
   },
 
   session: {

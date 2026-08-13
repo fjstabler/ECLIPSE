@@ -136,7 +136,7 @@ async function TastePanel() {
           avoid: [...chosen.avoid],
           favouritePeople: chosen.favouritePeople,
         });
-        toast('Taste profile saved — NOVA will use it straight away');
+        toast('Taste profile saved — N.O.V.A. will use it straight away');
       } catch (err) {
         toast(err.message);
       } finally {
@@ -150,7 +150,7 @@ async function TastePanel() {
   wrap.append(
     el('div', { class: 'panel' },
       el('h2', { class: 'panel__title' }, 'In your own words'),
-      el('p', { class: 'panel__hint' }, 'NOVA reads this before every recommendation. Be specific — "I like heist films but not action for its own sake" is far more useful than "I like action".'),
+      el('p', { class: 'panel__hint' }, 'N.O.V.A. reads this before every recommendation. Be specific — "I like heist films but not action for its own sake" is far more useful than "I like action".'),
       aboutBox),
 
     el('div', { class: 'panel' },
@@ -176,7 +176,7 @@ async function TastePanel() {
 
     el('div', { class: 'panel' },
       el('h2', { class: 'panel__title' }, 'Steer clear of'),
-      el('p', { class: 'panel__hint' }, 'NOVA will avoid recommending these and will say so if you ask for one anyway.'),
+      el('p', { class: 'panel__hint' }, 'N.O.V.A. will avoid recommending these and will say so if you ask for one anyway.'),
       pillGroup(AVOID, chosen.avoid)),
 
     saveBtn
@@ -261,28 +261,85 @@ async function LibraryPanel() {
 
     el('div', { class: 'panel' },
       el('h2', { class: 'panel__title' }, 'Integrations'),
+      el('p', { class: 'panel__hint' },
+        'Each of these is one line in the ', el('code', {}, '.env'),
+        ' file in your ECLIPSE folder. Add the key, save the file, then restart the server.'),
       el('div', { class: 'factlist' },
-        integrationRow('Metadata (TMDB)', status.integrations.tmdb, 'Set TMDB_API_KEY to fetch posters, synopses and cast.'),
-        integrationRow('NOVA conversation', status.integrations.nova, 'Set ANTHROPIC_API_KEY to chat with NOVA. Recommendations work without it.'),
-        integrationRow('On-the-fly conversion', status.integrations.transcode, 'Install ffmpeg so the browser can play .mkv and other containers.'),
-        integrationRow('Folder watching', status.integrations.watching, 'New files are picked up automatically.')))
+        setupRow({
+          name: 'Artwork and metadata',
+          on: status.integrations.tmdb,
+          envVar: 'TMDB_API_KEY',
+          link: 'https://www.themoviedb.org/settings/api',
+          linkLabel: 'Get a free TMDB key →',
+          whenOn: 'Posters, backdrops, synopses, cast and episode titles are being fetched and cached locally.',
+          whenOff:
+            'Without this, your files still appear and play — but they get generated placeholder posters ' +
+            'instead of real artwork, and no synopsis or cast. This is the one worth setting up first.',
+        }),
+        setupRow({
+          name: 'N.O.V.A. conversation',
+          on: status.integrations.nova,
+          envVar: 'OPENAI_API_KEY',
+          link: 'https://platform.openai.com/api-keys',
+          linkLabel: 'Get an OpenAI key →',
+          whenOn: 'Chatting with N.O.V.A. is on.',
+          whenOff:
+            'N.O.V.A. still ranks your library and explains every pick without this. A key lets you talk ' +
+            'to her — ask for something short and funny, or something like a film you liked.',
+        }),
+        setupRow({
+          name: 'Playing .mkv files',
+          on: status.integrations.transcode,
+          whenOn: 'ffmpeg conversion is on, so containers your browser cannot open will still play.',
+          whenOff:
+            'Install ffmpeg on this machine so .mkv and similar files can be converted as they play. ' +
+            'MP4 files play either way.',
+        }),
+        setupRow({
+          name: 'Watching folders',
+          on: status.integrations.watching,
+          whenOn: 'Files dropped into your library folders are added automatically, within seconds.',
+          whenOff: 'Automatic pickup is off — use the scan button above after adding files.',
+        })))
   );
 
   return wrap;
+}
+
+/**
+ * One integration, written so somebody who has never opened a .env file can act
+ * on it: what it does, what you lose without it, and exactly what to paste.
+ */
+function setupRow({ name, on, envVar, link, linkLabel, whenOn, whenOff }) {
+  return el('div', { class: 'fact' },
+    el('div', { class: 'fact__k' }, name.toUpperCase()),
+    el('div', { class: 'fact__v' },
+      el('span', { style: { color: on ? 'var(--good)' : 'var(--text-faint)', fontWeight: '600' } },
+        on ? '● Active' : '○ Not set up'),
+      el('div', { style: { fontSize: '12.5px', color: 'var(--text-faint)', marginTop: '5px', lineHeight: '1.55' } },
+        on ? whenOn : whenOff),
+      !on && envVar
+        ? el('div', { style: { marginTop: '10px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' } },
+            el('code', {
+              style: {
+                fontSize: '12px', background: 'var(--surface-3)', border: '1px solid var(--hairline)',
+                padding: '6px 10px', borderRadius: '6px',
+                fontFamily: 'ui-monospace, Menlo, monospace', color: 'var(--text)',
+              },
+            }, `${envVar}=paste-your-key-here`),
+            link
+              ? el('a', {
+                  href: link, target: '_blank', rel: 'noopener',
+                  style: { fontSize: '12.5px', color: '#b9aeff', textDecoration: 'underline' },
+                }, linkLabel)
+              : null)
+        : null));
 }
 
 function stat(value, label) {
   return el('div', { class: 'stat' },
     el('div', { class: 'stat__n' }, String(value)),
     el('div', { class: 'stat__l' }, label));
-}
-
-function integrationRow(name, on, hint) {
-  return el('div', { class: 'fact' },
-    el('div', { class: 'fact__k' }, name.toUpperCase()),
-    el('div', { class: 'fact__v' },
-      el('span', { style: { color: on ? 'var(--good)' : 'var(--text-faint)' } }, on ? '● Active' : '○ Not configured'),
-      el('div', { style: { fontSize: '12.5px', color: 'var(--text-faint)', marginTop: '3px' } }, hint)));
 }
 
 // --- profiles ---------------------------------------------------------------
@@ -323,7 +380,7 @@ async function ProfilesPanel() {
     wrap.append(
       el('div', { class: 'panel' },
         el('h2', { class: 'panel__title' }, 'Household profiles'),
-        el('p', { class: 'panel__hint' }, 'Everyone gets their own watch history, watchlist and taste profile — so NOVA recommends to each of them, not to the household average.'),
+        el('p', { class: 'panel__hint' }, 'Everyone gets their own watch history, watchlist and taste profile — so N.O.V.A. recommends to each of them, not to the household average.'),
         list),
 
       el('div', { class: 'panel' },
@@ -364,7 +421,7 @@ function AboutPanel() {
   return el('div', { class: 'panel' },
     el('h2', { class: 'panel__title' }, 'ECLIPSE'),
     el('p', { class: 'panel__hint' },
-      'A private streaming service for your home network. Drop files into a watched folder and they appear here with artwork and synopses, ready to play in any browser on the network. NOVA learns what each person likes and picks accordingly.'),
+      'A private streaming service for your home network. Drop files into a watched folder and they appear here with artwork and synopses, ready to play in any browser on the network. N.O.V.A. learns what each person likes and picks accordingly.'),
     el('div', { class: 'factlist' },
       el('div', { class: 'fact' },
         el('div', { class: 'fact__k' }, 'VERSION'),

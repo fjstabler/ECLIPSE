@@ -2,7 +2,7 @@ import { db } from '../db.js';
 import { decorate } from '../library.js';
 
 /**
- * NOVA's local recommendation engine.
+ * N.O.V.A.'s local recommendation engine.
  *
  * Content-based, and deliberately so: a home server has one household on it,
  * not a million users, so collaborative filtering has nothing to collaborate
@@ -10,7 +10,7 @@ import { decorate } from '../library.js';
  * the profile the user filled in, what they actually watched, and how they
  * rated it — and score every unwatched title in the library against it.
  *
- * This runs with no API key. The Claude layer in claude.js sits on top and
+ * This runs with no API key. The chat layer in openai.js sits on top and
  * explains the results conversationally; it does not replace them.
  */
 
@@ -246,7 +246,7 @@ export function recommend(userId, { limit = 20, kind = null, excludeSeen = true,
 }
 
 function explain(hits, profile, coldStart) {
-  if (coldStart) return 'Highly rated and recently added — tell NOVA what you like to sharpen this.';
+  if (coldStart) return 'Highly rated and recently added — tell N.O.V.A. what you like to sharpen this.';
   if (!hits.length) return 'A change of pace from your usual picks.';
 
   const byType = {};
@@ -265,7 +265,7 @@ function explain(hits, profile, coldStart) {
 
 /**
  * "More like this" — similarity between one title and the rest of the library.
- * Used both by the title page and by NOVA when the user names a film.
+ * Used both by the title page and by N.O.V.A. when the user names a film.
  */
 export function similarTo(titleId, { limit = 12, excludeIds = [] } = {}) {
   const seedTags = tagsForTitle.all(titleId);
@@ -331,14 +331,14 @@ export function similarTo(titleId, { limit = 12, excludeIds = [] } = {}) {
 
 /**
  * The rows on the home screen. Everything is derived from the same engine so
- * the shelves stay consistent with what NOVA would say.
+ * the shelves stay consistent with what N.O.V.A. would say.
  */
 export function homeRows(userId, { rowSize = 18 } = {}) {
   const rows = [];
   const { seen } = buildTasteVector(userId);
 
   const picks = recommend(userId, { limit: rowSize });
-  if (picks.length) rows.push({ id: 'for-you', title: 'Picked for you by NOVA', kind: 'nova', items: picks });
+  if (picks.length) rows.push({ id: 'for-you', title: 'Picked for you by N.O.V.A.', kind: 'nova', items: picks });
 
   const recent = db
     .prepare(`
@@ -404,7 +404,7 @@ export function homeRows(userId, { rowSize = 18 } = {}) {
   return rows;
 }
 
-/** A one-paragraph summary of taste NOVA can read as context. */
+/** A one-paragraph summary of taste N.O.V.A. can read as context. */
 export function tasteSummary(userId) {
   const { vector, profile, evidence } = buildTasteVector(userId);
 

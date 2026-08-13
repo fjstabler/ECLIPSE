@@ -69,7 +69,7 @@ export const api = {
 };
 
 /**
- * Stream a NOVA reply over Server-Sent Events.
+ * Stream a N.O.V.A. reply over Server-Sent Events.
  * `onEvent` receives { type, ... } objects as they arrive.
  */
 export async function novaChat(message, onEvent, signal) {
@@ -82,7 +82,7 @@ export async function novaChat(message, onEvent, signal) {
   });
 
   if (!res.ok) {
-    let detail = `NOVA is unavailable (${res.status})`;
+    let detail = `N.O.V.A. is unavailable (${res.status})`;
     try {
       const data = await res.json();
       if (data?.error) detail = data.error;

@@ -5,7 +5,8 @@ import {
   setSessionCookie, clearSessionCookie, requireAuth, requireAdmin,
 } from '../auth.js';
 import { getTasteProfile, saveTasteProfile } from '../nova/engine.js';
-import { novaAvailable } from '../nova/claude.js';
+import { novaAvailable } from '../nova/openai.js';
+import { hasTmdb } from '../metadata/tmdb.js';
 import { config } from '../config.js';
 
 export const router = express.Router();
@@ -23,6 +24,8 @@ router.get('/me', (req, res) => {
     features: {
       nova: novaAvailable(),
       transcode: config.ffmpeg.enabled,
+      // Drives the "artwork isn't set up yet" notice on the home screen.
+      metadata: hasTmdb(),
     },
   });
 });

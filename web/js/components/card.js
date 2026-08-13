@@ -16,7 +16,7 @@ export function Card(title, { variant = 'poster', showReason = false } = {}) {
   const badges = [];
   if (title.certification) badges.push(el('span', { class: 'badge' }, title.certification));
   if (isNew(title.added_at)) badges.push(el('span', { class: 'badge badge--new' }, 'NEW'));
-  if (showReason && title.score != null) badges.push(el('span', { class: 'badge badge--nova' }, 'NOVA'));
+  if (showReason && title.score != null) badges.push(el('span', { class: 'badge badge--nova' }, 'N.O.V.A.'));
 
   const node = el(
     'button',

@@ -4,7 +4,7 @@
  *
  * If TMDB_API_KEY is set the seeder pulls real artwork and synopses; without
  * it, ECLIPSE's own generated posters are used. Either way the tag data is
- * real enough that NOVA's recommendations behave the way they will in
+ * real enough that N.O.V.A.'s recommendations behave the way they will in
  * production.
  *
  *   npm run demo            seed the demo library

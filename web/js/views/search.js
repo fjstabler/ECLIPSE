@@ -48,7 +48,7 @@ export function openSearch() {
     if (!items.length) {
       grid.append(el('div', { class: 'empty', style: { gridColumn: '1 / -1' } },
         el('h2', {}, `Nothing on this server matches "${q}"`),
-        el('p', {}, 'Try a different spelling, or ask NOVA — it can search by mood as well as by name.')));
+        el('p', {}, 'Try a different spelling, or ask N.O.V.A. — it can search by mood as well as by name.')));
       return;
     }
     for (const item of items) grid.append(Card(item));
