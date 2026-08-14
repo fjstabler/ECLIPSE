@@ -2,11 +2,14 @@ package com.eclipse.tv;
 
 import android.app.Activity;
 import android.content.SharedPreferences;
+import android.os.Build;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.view.WindowManager;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
@@ -81,13 +84,26 @@ public class MainActivity extends Activity {
     }
 
     private void hideSystemBars() {
-        getWindow().getDecorView().setSystemUiVisibility(
-                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                        | View.SYSTEM_UI_FLAG_FULLSCREEN
-                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+        // The legacy systemUiVisibility flags are deprecated as of API 30 and
+        // can leave a sliver of system bar showing on newer Fire OS builds
+        // (Fire OS 8 is Android 11-based) — exactly the kind of thing that
+        // would eat into the top of the screen and read as clipped content.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            getWindow().setDecorFitsSystemWindows(false);
+            WindowInsetsController controller = getWindow().getInsetsController();
+            if (controller != null) {
+                controller.hide(WindowInsets.Type.systemBars());
+                controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            }
+        } else {
+            getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_FULLSCREEN
+                            | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+        }
     }
 
     @SuppressWarnings("SetJavaScriptEnabled")
@@ -101,11 +117,12 @@ public class MainActivity extends Activity {
         settings.setMediaPlaybackRequiresUserGesture(false);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        // Some Fire OS builds otherwise boost font/layout scale for
-        // "readability," which is exactly what pushes hero content taller
-        // than the screen. Pin it to 1:1 so CSS pixels mean what they say.
+        // Some Fire OS builds otherwise boost text scale for "readability,"
+        // which is exactly what pushes hero content taller than the screen.
+        // (setInitialScale() is deliberately not used here — it's known to
+        // fight with a page's own viewport meta tag on some WebView builds,
+        // which would work against width=device-width rather than help it.)
         settings.setTextZoom(100);
-        webView.setInitialScale(100);
         // The page's only signal that it's running here, not in a browser
         // — see index.html's inline detector script.
         settings.setUserAgentString(settings.getUserAgentString() + " ECLIPSE-TV/1.0");

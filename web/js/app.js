@@ -38,26 +38,38 @@ async function boot() {
   mountShell();
 }
 
+// Signing out and back in — switching profiles, which every household
+// member does on the same long-lived Fire TV session — calls boot() again.
+// Routes and document-level listeners must only ever be wired up once, or
+// every one of them fires twice per keypress on the second pass: two
+// listeners moving the cursor for a single ArrowDown looks exactly like
+// "it randomly jumps two."
+let shellInitialized = false;
+
 function mountShell() {
   const outlet = el('main', { id: 'outlet' });
   clear(app).append(Nav(), outlet);
   setOutlet(outlet);
 
-  defineRoute('/', HomeView);
-  defineRoute('/films', BrowseView);
-  defineRoute('/series', BrowseView);
-  defineRoute('/my-list', BrowseView);
-  defineRoute('/browse', BrowseView);
-  defineRoute('/title/:id', TitleView);
-  defineRoute('/settings', SettingsView);
+  if (!shellInitialized) {
+    shellInitialized = true;
+    defineRoute('/', HomeView);
+    defineRoute('/films', BrowseView);
+    defineRoute('/series', BrowseView);
+    defineRoute('/my-list', BrowseView);
+    defineRoute('/browse', BrowseView);
+    defineRoute('/title/:id', TitleView);
+    defineRoute('/settings', SettingsView);
+
+    bindGlobalKeys();
+    initTvNav();
+    bindTvBack();
+  }
 
   if (!location.hash) location.hash = '#/';
   render();
 
-  bindGlobalKeys();
   bindScroll();
-  initTvNav();
-  bindTvBack();
 }
 
 /**

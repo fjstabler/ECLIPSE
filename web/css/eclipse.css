@@ -767,18 +767,26 @@ textarea.input { height: auto; min-height: 96px; padding: 12px 15px; line-height
 .tv-mode .row { margin-bottom: clamp(22px, 2.6vw, 36px); }
 
 .tv-mode .hero {
-  min-height: min(50vh, 500px);
-  margin-bottom: -28px;
+  /* A pure vh value — not min()'d against a px cap — so this is always the
+     same *proportion* of whatever the real viewport turns out to be, and
+     mathematically cannot itself exceed the screen. What's left is making
+     sure the content stack inside it is short enough to fit that share;
+     center alignment means if it's ever a little too tall anyway, the
+     overflow splits evenly top and bottom instead of the previous
+     flex-end layout, which put all of it above the visible screen. */
+  min-height: 40vh;
+  align-items: center;
+  margin-bottom: -20px;
 }
 .tv-mode .hero__media img, .tv-mode .hero__body {
   animation: none; opacity: 1; transform: none;
 }
 .tv-mode .hero__body { max-width: min(560px, 86%); }
-.tv-mode .hero__logo { max-height: 84px; margin-bottom: 12px; }
-.tv-mode .hero__title { font-size: clamp(28px, 4.4vw, 48px); margin-bottom: 10px; }
-.tv-mode .hero__meta { margin-bottom: 10px; }
-.tv-mode .hero__overview { -webkit-line-clamp: 2; margin-bottom: 18px; }
-.tv-mode .hero__nova { margin-top: 14px; }
+.tv-mode .hero__logo { max-height: 64px; margin-bottom: 8px; }
+.tv-mode .hero__title { font-size: clamp(24px, 3.6vw, 40px); margin-bottom: 8px; }
+.tv-mode .hero__meta { margin-bottom: 8px; font-size: 13px; }
+.tv-mode .hero__overview { -webkit-line-clamp: 2; margin-bottom: 14px; font-size: 13px; }
+.tv-mode .hero__nova { margin-top: 10px; padding: 10px 14px; font-size: 12.5px; }
 
 /* Every backdrop-filter in the app, replaced with an equivalent solid fill. */
 .tv-mode .nav.is-stuck { backdrop-filter: none; background: rgba(8, 8, 12, 0.97); }

@@ -167,6 +167,14 @@ function focusFirstIfNeeded() {
 const ARROWS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
 const ACTIVATE_KEYS = new Set(['Enter', ' ']);
 
+// A physical remote press arriving as two keydown events — bounce, or an
+// Android/WebView quirk forwarding a single press twice — would move the
+// cursor two rows on what the viewer felt as one press. No legitimate
+// separate press happens this fast, so it's safe to collapse anything
+// inside this window down to a single hop.
+const MIN_MOVE_INTERVAL_MS = 140;
+let lastMoveAt = 0;
+
 export function initTvNav() {
   document.addEventListener('keydown', (e) => {
     if (document.querySelector('.player')) return; // the player owns arrows/enter for seek/volume/play
@@ -178,6 +186,9 @@ export function initTvNav() {
       // nothing in a single-line field, so they're free to move focus.
       if (typing && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return;
       e.preventDefault();
+      const now = Date.now();
+      if (now - lastMoveAt < MIN_MOVE_INTERVAL_MS) return;
+      lastMoveAt = now;
       moveFocus(e.key);
       return;
     }
