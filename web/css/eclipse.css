@@ -763,18 +763,33 @@ textarea.input { height: auto; min-height: 96px; padding: 12px 15px; line-height
   --gutter: clamp(32px, 5vw, 84px);
 }
 
-.tv-mode .page { padding-top: 18px; padding-bottom: 56px; }
+/* Only trims bottom whitespace — padding-top is deliberately left alone.
+   .page--padded already reserves correct clearance below the fixed nav
+   (calc(var(--nav-h) + 32px)), and a same-specificity-looking-but-actually-
+   higher-specificity `.tv-mode .page` rule setting its own padding-top
+   would win over it and silently steal that clearance back — which is
+   exactly what caused the toolbar (genre/sort dropdowns) to render
+   underneath the nav on Films/Series/My List. Home doesn't need help
+   here either: the hero supplies its own spacing. */
+.tv-mode .page { padding-bottom: 56px; }
 .tv-mode .row { margin-bottom: clamp(22px, 2.6vw, 36px); }
 
 .tv-mode .hero {
-  /* A pure vh value — not min()'d against a px cap — so this is always the
-     same *proportion* of whatever the real viewport turns out to be, and
-     mathematically cannot itself exceed the screen. What's left is making
-     sure the content stack inside it is short enough to fit that share;
-     center alignment means if it's ever a little too tall anyway, the
-     overflow splits evenly top and bottom instead of the previous
-     flex-end layout, which put all of it above the visible screen. */
-  min-height: 40vh;
+  /* Two guarantees, not one hopeful estimate:
+     1) padding-top reserves the nav's own height as dead space the flex
+        content box starts *below* — centering only happens in what's left,
+        so content cannot render into the nav's territory no matter how
+        short the content stack ends up being measured. This is what was
+        actually missing before: min-height alone stops the hero from
+        exceeding the screen, but says nothing about staying clear of a
+        68px bar floating on top of it.
+     2) min-height is a pure vh value, not min()'d against a px cap, so
+        the box itself is always the same proportion of whatever the real
+        viewport turns out to be — comfortably more than the content plus
+        that reserved nav space needs, checked at both 1080p and a
+        deliberately small 720p. */
+  min-height: 50vh;
+  padding-top: calc(var(--nav-h) + 16px);
   align-items: center;
   margin-bottom: -20px;
 }

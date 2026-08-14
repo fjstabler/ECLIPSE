@@ -33,6 +33,13 @@ export function initNova() {
     class: 'nova__input',
     rows: '1',
     placeholder: 'Ask N.O.V.A. what to watch…',
+    // Without this, Android's on-screen keyboard has no way to know this
+    // single field isn't part of a multi-step form — it defaults to a
+    // "Next" action that just tries to tab to another field (there isn't
+    // one, so it does nothing and the keyboard stays open) instead of
+    // submitting. "send" gets the right label and makes it actually
+    // dispatch the Enter the onKeydown handler below is listening for.
+    enterkeyhint: 'send',
     onInput: (e) => {
       e.target.style.height = 'auto';
       e.target.style.height = `${Math.min(e.target.scrollHeight, 140)}px`;

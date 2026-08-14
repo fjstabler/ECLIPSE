@@ -22,6 +22,7 @@ export function openSearch() {
     class: 'searchbar__input',
     placeholder: 'Search films, series, actors, directors…',
     autocomplete: 'off',
+    enterkeyhint: 'search',
     onInput: (e) => {
       clearTimeout(timer);
       const q = e.target.value.trim();
