@@ -37,8 +37,10 @@
 
 // The shelf paging arrows are a mouse-hover convenience (invisible until
 // :hover) — a remote can reach every card directly, so they'd only ever be
-// focused as an invisible, confusing dead stop.
-const FOCUSABLE = 'a[href], button:not([disabled]):not(.row__arrow), [tabindex]:not([tabindex="-1"]):not([disabled]), input:not([disabled]), select:not([disabled])';
+// focused as an invisible, confusing dead stop. The brand mark links home,
+// which from home is a no-op — selectable-but-does-nothing is worse than
+// not selectable, so it's excluded the same way.
+const FOCUSABLE = 'a[href]:not(.brand), button:not([disabled]):not(.row__arrow), [tabindex]:not([tabindex="-1"]):not([disabled]), input:not([disabled]), select:not([disabled])';
 
 const OVERLAP_SLACK = 2; // px — rows whose bands just graze each other still count as separate
 
@@ -167,12 +169,14 @@ function focusFirstIfNeeded() {
 const ARROWS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
 const ACTIVATE_KEYS = new Set(['Enter', ' ']);
 
-// A physical remote press arriving as two keydown events — bounce, or an
-// Android/WebView quirk forwarding a single press twice — would move the
-// cursor two rows on what the viewer felt as one press. No legitimate
-// separate press happens this fast, so it's safe to collapse anything
-// inside this window down to a single hop.
-const MIN_MOVE_INTERVAL_MS = 140;
+// The actual cause of "one press moved two rows" turned out to be a
+// duplicate event listener (fixed at the source in app.js — mountShell()
+// was re-binding it on every profile switch), not the remote double-firing
+// a press. This window is now only a backstop against a genuinely
+// same-tick duplicate dispatch, not a general debounce — anything longer
+// risks swallowing a real fast press, which is its own bug (reported as
+// "I press down and it doesn't move, then I have to press it again").
+const MIN_MOVE_INTERVAL_MS = 40;
 let lastMoveAt = 0;
 
 export function initTvNav() {

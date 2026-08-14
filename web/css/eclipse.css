@@ -775,33 +775,34 @@ textarea.input { height: auto; min-height: 96px; padding: 12px 15px; line-height
 .tv-mode .row { margin-bottom: clamp(22px, 2.6vw, 36px); }
 
 .tv-mode .hero {
-  /* Two guarantees, not one hopeful estimate:
-     1) padding-top reserves the nav's own height as dead space the flex
-        content box starts *below* — centering only happens in what's left,
-        so content cannot render into the nav's territory no matter how
-        short the content stack ends up being measured. This is what was
-        actually missing before: min-height alone stops the hero from
-        exceeding the screen, but says nothing about staying clear of a
-        68px bar floating on top of it.
-     2) min-height is a pure vh value, not min()'d against a px cap, so
-        the box itself is always the same proportion of whatever the real
-        viewport turns out to be — comfortably more than the content plus
-        that reserved nav space needs, checked at both 1080p and a
-        deliberately small 720p. */
+  /* padding-top reserves the nav's own height as dead space the flex
+     content box starts *below* — so content is guaranteed clear of the
+     nav no matter how it's aligned within what's left. That guarantee is
+     what makes flex-end safe to use here: bottom-anchoring the content
+     (rather than centering it, which left an awkward gap above
+     "Continue watching" and read as content "squashed" up near the nav)
+     no longer risks the content's *top* edge drifting into the nav the
+     way it did before this padding existed — flex-end only pushes
+     content toward the *bottom* of its box, and the reserved padding-top
+     is never part of that box in the first place.
+     min-height is a pure vh value, not min()'d against a px cap, so it's
+     always the same proportion of whatever the real screen turns out to
+     be; checked at 1080p and a deliberately small 720p for real
+     clearance, not just barely-not-touching. */
   min-height: 50vh;
   padding-top: calc(var(--nav-h) + 16px);
-  align-items: center;
-  margin-bottom: -20px;
+  align-items: flex-end;
+  margin-bottom: -16px;
 }
 .tv-mode .hero__media img, .tv-mode .hero__body {
   animation: none; opacity: 1; transform: none;
 }
 .tv-mode .hero__body { max-width: min(560px, 86%); }
-.tv-mode .hero__logo { max-height: 64px; margin-bottom: 8px; }
-.tv-mode .hero__title { font-size: clamp(24px, 3.6vw, 40px); margin-bottom: 8px; }
-.tv-mode .hero__meta { margin-bottom: 8px; font-size: 13px; }
-.tv-mode .hero__overview { -webkit-line-clamp: 2; margin-bottom: 14px; font-size: 13px; }
-.tv-mode .hero__nova { margin-top: 10px; padding: 10px 14px; font-size: 12.5px; }
+.tv-mode .hero__logo { max-height: 72px; margin-bottom: 10px; }
+.tv-mode .hero__title { font-size: clamp(26px, 3.8vw, 42px); margin-bottom: 10px; }
+.tv-mode .hero__meta { margin-bottom: 10px; }
+.tv-mode .hero__overview { -webkit-line-clamp: 2; margin-bottom: 16px; }
+.tv-mode .hero__nova { margin-top: 12px; }
 
 /* Every backdrop-filter in the app, replaced with an equivalent solid fill. */
 .tv-mode .nav.is-stuck { backdrop-filter: none; background: rgba(8, 8, 12, 0.97); }

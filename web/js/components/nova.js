@@ -222,7 +222,12 @@ async function send() {
     toolLine.remove();
     busy = false;
     sendBtn.disabled = !inputNode.value.trim();
-    inputNode.focus();
+    // Deliberately not refocusing the input here. On a TV, the field is
+    // behind an on-screen keyboard overlay — re-focusing it immediately
+    // after sending re-triggers that keyboard, which is why it looked
+    // like it "wouldn't close until I pressed back": this line was
+    // pulling it right back open every time. A desktop user can just
+    // click back in if they want to keep typing.
     scrollToEnd();
   }
 }
