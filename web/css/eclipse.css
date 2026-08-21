@@ -677,6 +677,23 @@ a.tv-cursor, button.tv-cursor, [tabindex].tv-cursor {
   border-radius: var(--radius); background: rgba(16,16,24,0.94); border: 1px solid var(--hairline-strong);
   backdrop-filter: blur(14px); animation: riseIn 0.4s var(--ease) both;
 }
+
+.player__menu {
+  position: fixed; z-index: 450; min-width: 200px; max-width: 280px;
+  max-height: 60vh; overflow-y: auto;
+  background: rgba(16,16,24,0.97); border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius); padding: 6px; box-shadow: var(--shadow-pop);
+  animation: riseIn 0.15s var(--ease) both;
+}
+.player__menu-item {
+  display: block; width: 100%; text-align: left;
+  padding: 10px 12px; border-radius: var(--radius-sm); border: 0; background: none;
+  color: var(--text); font-size: 13.5px; cursor: pointer;
+}
+.player__menu-item:hover, .player__menu-item:focus-visible, .player__menu-item.tv-cursor {
+  background: var(--surface-3); outline: none;
+}
+.player__menu-item.is-active { color: var(--corona-1); font-weight: 600; }
 .player__loading {
   position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
   width: 46px; height: 46px; border-radius: 50%;

@@ -54,7 +54,13 @@ function isVisible(el) {
 }
 
 function candidates() {
-  return Array.from(document.querySelectorAll(FOCUSABLE)).filter(isVisible);
+  // A player track menu (audio/subtitle picker) is the one place content
+  // floats on top of the player while it's open — scope navigation to just
+  // its items, or the background page (still fully in the DOM, just
+  // visually covered by the player) would be reachable right past it.
+  const menu = document.querySelector('.player__menu');
+  const scope = menu || document;
+  return Array.from(scope.querySelectorAll(FOCUSABLE)).filter(isVisible);
 }
 
 /** Position used for row clustering — real document position, except the
@@ -181,7 +187,10 @@ let lastMoveAt = 0;
 
 export function initTvNav() {
   document.addEventListener('keydown', (e) => {
-    if (document.querySelector('.player')) return; // the player owns arrows/enter for seek/volume/play
+    // The player owns arrows/Enter for seek/volume/play — except while its
+    // own audio/subtitle menu is open, when this takes over navigating that
+    // menu's items instead (candidates() scopes to just the menu for this).
+    if (document.querySelector('.player') && !document.querySelector('.player__menu')) return;
 
     const typing = e.target.matches('input, textarea, select, [contenteditable]');
 

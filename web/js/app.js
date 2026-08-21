@@ -9,7 +9,7 @@ import { SettingsView } from './views/settings.js';
 import { AuthView } from './views/auth.js';
 import { openSearch, closeSearch, isSearchOpen } from './views/search.js';
 import { toggleNova, openNova, closeNova, isNovaOpen } from './components/nova.js';
-import { closePlayer } from './components/player.js';
+import { closePlayer, closeActiveTrackMenu } from './components/player.js';
 import { initTvNav } from './tvnav.js';
 
 const app = document.getElementById('app');
@@ -81,6 +81,7 @@ function mountShell() {
  */
 function bindTvBack() {
   window.eclipseTvBack = () => {
+    if (closeActiveTrackMenu()) return true;
     if (document.querySelector('.player')) { closePlayer(); return true; }
     if (isSearchOpen()) { closeSearch(); return true; }
     if (isNovaOpen()) { closeNova(); return true; }

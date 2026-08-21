@@ -118,13 +118,15 @@ Without ffmpeg, `.mkv` files appear in the library but won't play. Set
 `ECLIPSE_TRANSCODE=false` to disable conversion entirely.
 
 **Multiple audio languages.** A file with more than one audio track — common
-for `.mkv` releases — gets a language button in the player. For files the
-browser plays directly, switching is instant, through the browser's own
-audio track list. For everything remuxed through ffmpeg, switching restarts
-the stream at the current position with the chosen track, the same way
-seeking already works. Track languages come from whatever the file itself
-is tagged with; a file scanned before this existed picks its tracks up on
-the next `npm run scan -- --full`.
+for `.mkv` releases — gets a language button in the player that opens a
+Jellyfin-style picker: every available language listed by name, with the
+one currently playing marked. Picking a track always restarts the stream
+through ffmpeg at the current position with that track mapped in — the
+same mechanism seeking already uses — rather than relying on the browser's
+own (unreliable, direct-play-only) audio track API. Subtitles get the same
+kind of picker. Track languages come from whatever the file itself is
+tagged with; a file scanned before this existed picks its tracks up on the
+next `npm run scan -- --full`.
 
 **Player keyboard shortcuts**
 
@@ -132,8 +134,8 @@ the next `npm run scan -- --full`.
 |---|---|---|---|
 | `Space` / `K` | Play or pause | `F` | Fullscreen |
 | `←` / `→` | Skip 10 seconds | `M` | Mute |
-| `↑` / `↓` | Volume | `C` | Cycle subtitles |
-| `A` | Cycle audio language | `Esc` | Close player |
+| `↑` / `↓` | Volume | `C` | Subtitle menu |
+| `A` | Audio language menu | `Esc` | Close player / menu |
 
 Elsewhere: `/` opens search, `N` toggles N.O.V.A.
 

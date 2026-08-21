@@ -130,20 +130,19 @@ class Player {
     this.fsBtn = el('button', { class: 'pbtn', type: 'button', onClick: () => this.toggleFullscreen() }, icon('fullscreen'));
 
     const subs = this.ctx.subtitles || [];
-    const subBtn = subs.length
-      ? el('button', { class: 'pbtn', type: 'button', title: 'Subtitles', onClick: () => this.cycleSubtitles() },
+    this.subBtn = subs.length
+      ? el('button', { class: 'pbtn', type: 'button', title: 'Subtitles', onClick: (e) => this.toggleSubtitleMenu(e.currentTarget) },
           el('span', { html: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M7 14h4M13 14h4" stroke-linecap="round"/></svg>' }))
       : null;
 
-    // Hidden until we actually know there's more than one track — for a
-    // remux that's immediate (ffprobe already knows); for direct play it
-    // depends on what the browser itself finds once the file loads.
+    // ffprobe already knows every audio track a file has, direct-play or
+    // not, so this doesn't need to wait on anything the way subtitles used
+    // to wait on the browser's own track list.
     this.audioBtn = el(
       'button',
-      { class: 'pbtn', type: 'button', title: 'Audio language', hidden: true, onClick: () => this.cycleAudioTrack() },
+      { class: 'pbtn', type: 'button', title: 'Audio language', hidden: (this.ctx.audioTracks || []).length < 2, onClick: (e) => this.toggleAudioMenu(e.currentTarget) },
       icon('language')
     );
-    if (this.mode === 'transcode') this.audioBtn.hidden = (this.ctx.audioTracks || []).length < 2;
 
     this.ui = el(
       'div',
@@ -176,7 +175,7 @@ class Player {
           this.timeLabel,
           el('div', { class: 'player__spacer' }),
           this.audioBtn,
-          subBtn,
+          this.subBtn,
           el('div', { class: 'player__volume' }, this.muteBtn, this.volumeInput),
           this.fsBtn
         )
@@ -205,12 +204,6 @@ class Player {
   bindVideo() {
     const v = this.video;
 
-    v.addEventListener('loadedmetadata', () => {
-      // Direct play never touches the server for this — the browser's own
-      // demuxer either exposes multiple tracks or it doesn't, and that's
-      // only known once the file has actually loaded.
-      if (this.mode === 'direct') this.audioBtn.hidden = (v.audioTracks?.length || 0) < 2;
-    });
     v.addEventListener('play', () => { this.playBtn.innerHTML = ''; this.playBtn.append(icon('pause')); });
     v.addEventListener('pause', () => { this.playBtn.innerHTML = ''; this.playBtn.append(icon('play')); });
     v.addEventListener('timeupdate', () => this.tick());
@@ -312,48 +305,86 @@ class Player {
     }
   }
 
-  cycleSubtitles() {
+  toggleSubtitleMenu(anchor) {
     const tracks = [...this.video.textTracks];
     if (!tracks.length) return;
-    const activeIndex = tracks.findIndex((t) => t.mode === 'showing');
-    for (const t of tracks) t.mode = 'disabled';
-    const nextIndex = activeIndex + 1;
-    if (nextIndex < tracks.length) {
-      tracks[nextIndex].mode = 'showing';
-      toast(`Subtitles: ${tracks[nextIndex].label}`);
-    } else {
-      toast('Subtitles off');
-    }
+    const current = tracks.findIndex((t) => t.mode === 'showing') + 1; // 0 = Off
+    const labels = ['Off', ...tracks.map((t) => t.label)];
+    this.openTrackMenu('subtitle', anchor, labels, current, (i) => {
+      for (const t of tracks) t.mode = 'disabled';
+      if (i === 0) { toast('Subtitles off'); return; }
+      tracks[i - 1].mode = 'showing';
+      toast(`Subtitles: ${tracks[i - 1].label}`);
+    });
   }
 
   /**
-   * Direct play switches instantly, through the browser's own AudioTrack
-   * list (Chromium-based browsers; not universally supported, hence the
-   * length check rather than assuming it exists). A remux has no such API —
-   * the choice has to be baked into the stream itself, so it restarts the
-   * pipe at the current position with a different track mapped in, the same
-   * way seeking already does.
+   * The browser's own AudioTrack API (used here in an earlier version) only
+   * reliably works for adaptive streaming, not a plain progressive <video
+   * src>— toggling .enabled on a direct-play file's tracks routinely does
+   * nothing in Chromium, which is exactly the "the button doesn't actually
+   * change anything" bug report this replaced. Every track switch now goes
+   * through the server: attachSource restarts the stream as a remux with
+   * the chosen track mapped in, the same mechanism seeking already uses,
+   * even for a file that would otherwise have played directly.
    */
-  cycleAudioTrack() {
-    if (this.mode === 'direct') {
-      const tracks = this.video.audioTracks;
-      if (!tracks || tracks.length < 2) return;
-      const arr = Array.from(tracks);
-      const activeIndex = Math.max(0, arr.findIndex((t) => t.enabled));
-      const nextIndex = (activeIndex + 1) % arr.length;
-      arr.forEach((t, i) => { t.enabled = i === nextIndex; });
-      const t = arr[nextIndex];
-      toast(`Audio: ${t.label || t.language || `Track ${nextIndex + 1}`}`);
-      return;
-    }
-
+  toggleAudioMenu(anchor) {
     const tracks = this.ctx.audioTracks || [];
     if (tracks.length < 2) return;
-    const currentIndex = Math.max(0, tracks.findIndex((t) => t.trackIndex === this.audioTrackIndex));
-    const next = tracks[(currentIndex + 1) % tracks.length];
-    this.audioTrackIndex = next.trackIndex;
-    toast(`Audio: ${next.label}`);
-    this.attachSource(this.currentTime);
+    const current = this.audioTrackIndex != null
+      ? tracks.findIndex((t) => t.trackIndex === this.audioTrackIndex)
+      : Math.max(0, tracks.findIndex((t) => t.isDefault));
+    this.openTrackMenu('audio', anchor, tracks.map((t) => t.label), current, (i) => {
+      const next = tracks[i];
+      this.audioTrackIndex = next.trackIndex;
+      this.mode = 'transcode';
+      toast(`Audio: ${next.label}`);
+      this.attachSource(this.currentTime);
+    });
+  }
+
+  /** A small floating list above whichever button opened it — Jellyfin-style
+   * track picker rather than a blind cycle-and-hope-you-notice button. */
+  openTrackMenu(key, anchor, labels, currentIndex, onSelect) {
+    if (this.menuFor === key) { this.closeTrackMenu(); return; }
+    this.closeTrackMenu();
+    this.menuFor = key;
+
+    const menu = el(
+      'div',
+      { class: 'player__menu' },
+      labels.map((label, i) =>
+        el('button', {
+          class: `player__menu-item${i === currentIndex ? ' is-active' : ''}`, type: 'button',
+          onClick: () => { this.closeTrackMenu(); onSelect(i); },
+        }, label)
+      )
+    );
+
+    const rect = anchor.getBoundingClientRect();
+    menu.style.bottom = `${window.innerHeight - rect.top + 8}px`;
+    menu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 260))}px`;
+
+    document.body.append(menu);
+    this.trackMenu = menu;
+
+    // The click that opened this menu is still bubbling; listening for the
+    // next one would close it immediately.
+    setTimeout(() => {
+      this.menuOutsideHandler = (e) => { if (!menu.contains(e.target)) this.closeTrackMenu(); };
+      document.addEventListener('click', this.menuOutsideHandler);
+    }, 0);
+    this.menuKeyHandler = (e) => { if (e.key === 'Escape') this.closeTrackMenu(); };
+    document.addEventListener('keydown', this.menuKeyHandler);
+  }
+
+  closeTrackMenu() {
+    if (!this.trackMenu) return;
+    this.trackMenu.remove();
+    this.trackMenu = null;
+    this.menuFor = null;
+    if (this.menuOutsideHandler) { document.removeEventListener('click', this.menuOutsideHandler); this.menuOutsideHandler = null; }
+    if (this.menuKeyHandler) { document.removeEventListener('keydown', this.menuKeyHandler); this.menuKeyHandler = null; }
   }
 
   showNextCard() {
@@ -413,6 +444,10 @@ class Player {
 
   bindKeys() {
     this.keyHandler = (e) => {
+      // A track menu owns the keyboard while it's open — tvnav.js takes
+      // over arrow/Enter navigation of its items (see the scoping in
+      // tvnav.js), and its own Escape handler closes just the menu.
+      if (this.trackMenu) return;
       if (e.target.matches('input, textarea')) return;
       switch (e.key) {
         case ' ': case 'k': e.preventDefault(); this.toggle(); break;
@@ -422,8 +457,8 @@ class Player {
         case 'ArrowDown': e.preventDefault(); this.video.volume = Math.max(0, this.video.volume - 0.1); break;
         case 'f': this.toggleFullscreen(); break;
         case 'm': this.toggleMute(); break;
-        case 'c': this.cycleSubtitles(); break;
-        case 'a': this.cycleAudioTrack(); break;
+        case 'c': if (this.subBtn) this.toggleSubtitleMenu(this.subBtn); break;
+        case 'a': if (this.audioBtn) this.toggleAudioMenu(this.audioBtn); break;
         case 'Escape': if (!document.fullscreenElement) closePlayer(); break;
         default: break;
       }
@@ -452,6 +487,7 @@ class Player {
       .catch(() => {});
     document.removeEventListener('keydown', this.keyHandler);
     clearTimeout(this.idleTimer);
+    this.closeTrackMenu();
     // Detach the source so the browser stops pulling bytes immediately.
     this.video.pause();
     this.video.removeAttribute('src');
@@ -460,4 +496,11 @@ class Player {
     this.root.remove();
     document.body.classList.remove('is-locked');
   }
+}
+
+/** For the Fire TV back-button bridge — close just an open track menu
+ * before it falls through to closing the whole player. */
+export function closeActiveTrackMenu() {
+  if (active?.trackMenu) { active.closeTrackMenu(); return true; }
+  return false;
 }
