@@ -77,6 +77,18 @@ a.tv-cursor, button.tv-cursor, [tabindex].tv-cursor {
   outline-offset: 3px;
   border-radius: 8px;
 }
+/* .tv-cursor specifically, not desktop's :focus-visible — cards get a
+   scale-and-lift on focus that makes them impossible to miss even while
+   the page is gliding underneath them; a 2px outline on a plain button or
+   nav link doesn't have that same weight, which is exactly what read as
+   "it doesn't focus properly" reaching the hero and the nav going back up
+   (both button-shaped stops, unlike the card-shaped rows in between). A
+   soft glow matching the outline gives them comparable presence without
+   scaling — nav links in particular sit too close together (4px gap) for
+   a scale transform not to visually crowd its neighbours. */
+a.tv-cursor:not(.card), button.tv-cursor:not(.card), [tabindex].tv-cursor:not(.card) {
+  box-shadow: 0 0 0 4px rgba(124, 92, 255, 0.35), 0 8px 22px -6px rgba(124, 92, 255, 0.6);
+}
 
 ::selection { background: rgba(124, 92, 255, 0.4); }
 
@@ -912,6 +924,13 @@ textarea.input { height: auto; min-height: 96px; padding: 12px 15px; line-height
    else (the row's own paging arrows, a mouse in Downloader's built-in
    browser) doesn't feel inconsistent with everything else on screen. */
 .tv-mode .row__track { scroll-behavior: auto; }
+
+/* No mouse ever grabs a scrollbar thumb on a TV — the page's own vertical
+   one, thin as it is, just reads as "this is a webpage," working against
+   the glide's whole point. Desktop keeps it; there it's a real, useful
+   affordance for a trackpad or a wheel. */
+.tv-mode { scrollbar-width: none; }
+.tv-mode::-webkit-scrollbar { display: none; }
 
 /* The player, D-pad-navigable. Buttons read a little larger from a couch,
    and the cursor ring gets a touch more room to stay legible at that
