@@ -268,12 +268,28 @@ a.tv-cursor, button.tv-cursor, [tabindex].tv-cursor {
 
 /* ===================== rows ===================== */
 
-.page { padding-bottom: 90px; min-height: 100vh; }
+/* Every view's top-level wrapper — a plain instant swap between pages read
+   as a pop rather than a transition, which was the biggest single gap
+   between this and a real streaming app. GPU-only properties (opacity +
+   transform), so it costs nothing extra to also run in tv-mode. */
+.page { padding-bottom: 90px; min-height: 100vh; animation: pageIn 0.26s var(--ease) both; }
+@keyframes pageIn { from { opacity: 0; } to { opacity: 1; } }
 .page--padded { padding-top: calc(var(--nav-h) + 32px); }
 
 /* The hero's scrim is a positioned layer, and the hero overlaps the first row
-   by design. Rows need to sit above that scrim or their titles get veiled. */
-.row { position: relative; z-index: 2; margin-bottom: clamp(28px, 3.4vw, 48px); }
+   by design. Rows need to sit above that scrim or their titles get veiled.
+   Each row rises in with a slight stagger — a plain simultaneous fade read
+   as flat next to the hero's own entrance; capped past the fifth row so a
+   long library doesn't leave the last few shelves waiting on a queue. */
+.row {
+  position: relative; z-index: 2; margin-bottom: clamp(28px, 3.4vw, 48px);
+  animation: riseIn 0.5s var(--ease) both;
+}
+.row:nth-child(2) { animation-delay: 0.05s; }
+.row:nth-child(3) { animation-delay: 0.1s; }
+.row:nth-child(4) { animation-delay: 0.15s; }
+.row:nth-child(5) { animation-delay: 0.2s; }
+.row:nth-child(n+6) { animation-delay: 0.25s; }
 .row__head { display: flex; align-items: baseline; gap: 12px; padding: 0 var(--gutter); margin-bottom: 14px; }
 .row__title { font-size: clamp(17px, 1.5vw, 21px); font-weight: 700; letter-spacing: -0.01em; margin: 0; }
 .row__title--nova { display: flex; align-items: center; gap: 9px; }
@@ -420,6 +436,7 @@ a.tv-cursor, button.tv-cursor, [tabindex].tv-cursor {
   gap: 18px; align-items: center; padding: 14px; border-radius: var(--radius);
   cursor: pointer; transition: background 0.2s; border: 0; background: transparent;
   width: 100%; text-align: left; color: inherit;
+  animation: fadeIn 0.2s var(--ease) both;
 }
 .episode:hover { background: var(--surface-2); }
 .episode__num { font-size: 20px; font-weight: 700; color: var(--text-faint); text-align: center; }
@@ -446,7 +463,14 @@ a.tv-cursor, button.tv-cursor, [tabindex].tv-cursor {
   grid-template-columns: repeat(auto-fill, minmax(clamp(130px, 13vw, 176px), 1fr));
   padding: 0 var(--gutter);
 }
-.grid .card { width: 100%; }
+/* Same wave-in treatment as home's rows, batched roughly by visible row
+   instead of a per-card index — capped at 24 so a long library's grid
+   doesn't leave the last cards visibly waiting their turn. */
+.grid .card { width: 100%; animation: riseIn 0.4s var(--ease) both; }
+.grid .card:nth-child(n+7):nth-child(-n+12) { animation-delay: 0.05s; }
+.grid .card:nth-child(n+13):nth-child(-n+18) { animation-delay: 0.1s; }
+.grid .card:nth-child(n+19):nth-child(-n+24) { animation-delay: 0.15s; }
+.grid .card:nth-child(n+25) { animation-delay: 0.2s; }
 
 .toolbar {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
@@ -724,6 +748,7 @@ a.tv-cursor, button.tv-cursor, [tabindex].tv-cursor {
   width: min(420px, 100%); background: rgba(16,16,24,0.8); backdrop-filter: blur(20px);
   border: 1px solid var(--hairline); border-radius: var(--radius-lg); padding: 38px 34px;
   box-shadow: var(--shadow-pop);
+  animation: riseIn 0.5s var(--ease) both;
 }
 .auth__brand { display: flex; align-items: center; gap: 12px; justify-content: center; margin-bottom: 8px; }
 .auth__brand .brand__mark { width: 32px; height: 32px; }

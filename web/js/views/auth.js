@@ -31,6 +31,12 @@ export function AuthView({ onSignedIn }) {
     }, firstRun ? 'Create your profile' : 'Sign in');
 
     async function submit() {
+      // Dismiss the on-screen keyboard the moment submission starts, not
+      // whenever the network round-trip happens to finish — on Fire TV
+      // there's nothing else that would close it, and leaving a focused
+      // text field sitting there while a request is in flight is exactly
+      // the kind of thing that reads as the app hanging.
+      document.activeElement?.blur();
       errorBox.style.display = 'none';
       submitBtn.disabled = true;
       try {

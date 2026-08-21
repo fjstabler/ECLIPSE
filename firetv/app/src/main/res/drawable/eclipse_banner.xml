@@ -1,18 +1,38 @@
+<!--
+  Fire TV's home-screen rows show apps as rectangular banner tiles (Amazon's
+  signature look, unlike Android TV's circular icons) — this is what
+  android:banner in the manifest points at. The previous version filled the
+  tile with the same near-black (#08080C) the rest of the app uses, which is
+  close enough to the launcher's own dark background that the tile itself
+  became invisible against it, leaving only the small logo mark floating —
+  reading as "the icon is just a circle" rather than as a tile. A visibly
+  distinct gradient fill plus a hairline border keeps the tile's edges
+  legible against any home-screen background.
+-->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="rectangle">
-            <solid android:color="#08080C" />
+            <corners android:radius="6dp" />
+            <gradient android:type="linear" android:angle="135"
+                android:startColor="#1A1024" android:centerColor="#241736" android:endColor="#150E1F" />
         </shape>
     </item>
-    <item android:width="72dp" android:height="72dp" android:gravity="center">
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="6dp" />
+            <stroke android:width="1dp" android:color="#3A2E52" />
+            <solid android:color="@android:color/transparent" />
+        </shape>
+    </item>
+    <item android:width="96dp" android:height="96dp" android:gravity="center">
         <shape android:shape="oval">
             <gradient android:type="linear" android:angle="45"
                 android:startColor="#7C5CFF" android:centerColor="#B34BD8" android:endColor="#FF7A45" />
         </shape>
     </item>
-    <item android:width="58dp" android:height="58dp" android:gravity="center" android:left="14dp">
+    <item android:width="78dp" android:height="78dp" android:gravity="center" android:left="19dp">
         <shape android:shape="oval">
-            <solid android:color="#08080C" />
+            <solid android:color="#1D1329" />
         </shape>
     </item>
 </layer-list>

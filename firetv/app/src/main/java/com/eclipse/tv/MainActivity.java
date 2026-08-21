@@ -11,6 +11,7 @@ import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import android.view.inputmethod.InputMethodManager;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -180,6 +181,17 @@ public class MainActivity extends Activity {
     }
 
     private void tryConnect() {
+        // Neither submit path (the on-screen keyboard's Done action, or
+        // clicking Connect with the remote while the field still has real
+        // focus) makes Android dismiss its own soft keyboard on its own —
+        // hiding the WebView underneath it doesn't touch the IME, which is
+        // still attached to a EditText that's merely invisible now, not
+        // blurred. Left alone, that's a keyboard sitting on top of the
+        // player/library with nothing on screen to dismiss it, which is
+        // what "have to press Home and come back" was actually working
+        // around.
+        hideKeyboard();
+
         String value = urlField.getText().toString().trim();
         if (TextUtils.isEmpty(value)) return;
         if (!value.startsWith("http://") && !value.startsWith("https://")) {
@@ -187,6 +199,11 @@ public class MainActivity extends Activity {
         }
         prefs().edit().putString(KEY_URL, value).apply();
         load(value);
+    }
+
+    private void hideKeyboard() {
+        InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+        if (imm != null) imm.hideSoftInputFromWindow(urlField.getWindowToken(), 0);
     }
 
     private void load(String url) {
