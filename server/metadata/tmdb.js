@@ -126,6 +126,41 @@ export async function searchSeries(title, year) {
     .sort((a, b) => b.s - a.s)[0].r;
 }
 
+/**
+ * The full candidate list for a search, for a picker UI rather than the
+ * scanner's automatic best-guess. Ordered by the same scoring searchMovie
+ * uses, just not collapsed down to one result.
+ */
+export async function searchMovieCandidates(query) {
+  const data = await request('/search/movie', { query, include_adult: false });
+  return (data.results || [])
+    .map((r) => ({ r, s: scoreCandidate(r, query, null) }))
+    .sort((a, b) => b.s - a.s)
+    .slice(0, 12)
+    .map(({ r }) => ({
+      tmdbId: r.id,
+      title: r.title,
+      year: r.release_date ? Number(r.release_date.slice(0, 4)) : null,
+      poster: imageUrl(r.poster_path, 'w185'),
+      overview: r.overview || '',
+    }));
+}
+
+export async function searchSeriesCandidates(query) {
+  const data = await request('/search/tv', { query, include_adult: false });
+  return (data.results || [])
+    .map((r) => ({ r, s: scoreCandidate(r, query, null) }))
+    .sort((a, b) => b.s - a.s)
+    .slice(0, 12)
+    .map(({ r }) => ({
+      tmdbId: r.id,
+      title: r.name,
+      year: r.first_air_date ? Number(r.first_air_date.slice(0, 4)) : null,
+      poster: imageUrl(r.poster_path, 'w185'),
+      overview: r.overview || '',
+    }));
+}
+
 export async function movieDetails(id) {
   const data = await request(`/movie/${id}`, {
     append_to_response: 'credits,keywords,videos,release_dates,images',

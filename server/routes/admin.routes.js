@@ -5,7 +5,7 @@ import { requireAdmin } from '../auth.js';
 import { config } from '../config.js';
 import { runScan, scanStatus } from '../scanner/scanner.js';
 import { libraryStats, listTitles, getTitle } from '../library.js';
-import { hasTmdb } from '../metadata/tmdb.js';
+import { hasTmdb, searchMovieCandidates, searchSeriesCandidates } from '../metadata/tmdb.js';
 import { novaAvailable } from '../nova/openai.js';
 import { sortTitle } from '../util/parse.js';
 import { cacheImage } from '../metadata/artwork.js';
@@ -56,6 +56,21 @@ router.get('/unmatched', (req, res) => {
     files: db.prepare('SELECT filename FROM media_files WHERE title_id = ? LIMIT 3').all(r.id).map((f) => f.filename),
   }));
   res.json({ items: withFiles });
+});
+
+/** Search TMDB by name, for the "pick the right one" list in the edit modal. */
+router.get('/tmdb-search', async (req, res) => {
+  const kind = req.query.kind === 'series' ? 'series' : 'movie';
+  const q = String(req.query.q || '').trim();
+  if (!q) return res.json({ items: [] });
+  if (!hasTmdb()) return res.status(503).json({ error: 'No TMDB API key is configured' });
+
+  try {
+    const items = kind === 'movie' ? await searchMovieCandidates(q) : await searchSeriesCandidates(q);
+    res.json({ items });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
 });
 
 /** Point a title at a specific TMDB id when the automatic match got it wrong. */

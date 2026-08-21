@@ -239,25 +239,54 @@ function EditMetadataModal(title) {
   const posterInput = el('input', { class: 'input', value: title.poster || '', placeholder: 'https://…' });
   const backdropInput = el('input', { class: 'input', value: title.backdrop || '', placeholder: 'https://…' });
 
-  const tmdbIdInput = el('input', { class: 'input', type: 'number', placeholder: 'e.g. 27205' });
-  const rematchBtn = el('button', {
-    class: 'btn btn--ghost btn--sm', type: 'button',
-    onClick: async () => {
-      const tmdbId = Number(tmdbIdInput.value);
-      if (!tmdbId) { toast('Enter a TMDB id first'); return; }
-      rematchBtn.disabled = true;
-      try {
-        await api.adminMatchTitle(title.id, tmdbId);
-        toast('Re-fetched from TMDB');
-        close();
-        navigate(`/title/${title.id}`);
-      } catch (err) {
-        toast(err.message || 'Could not fetch that TMDB id');
-      } finally {
-        rematchBtn.disabled = false;
+  const applyMatch = async (tmdbId, btn) => {
+    if (btn) btn.disabled = true;
+    try {
+      await api.adminMatchTitle(title.id, tmdbId);
+      toast('Matched from TMDB');
+      close();
+      navigate(`/title/${title.id}`);
+    } catch (err) {
+      toast(err.message || 'Could not fetch that match');
+      if (btn) btn.disabled = false;
+    }
+  };
+
+  const searchInput = el('input', { class: 'input', value: title.title, placeholder: 'Search TMDB…' });
+  const resultsBox = el('div', { class: 'modal__results' });
+
+  const showResultsMessage = (text) =>
+    clear(resultsBox).append(el('p', { class: 'modal__hint', style: { margin: 0 } }, text));
+
+  async function runSearch() {
+    const q = searchInput.value.trim();
+    if (!q) return;
+    showResultsMessage('Searching…');
+    try {
+      const { items } = await api.adminTmdbSearch(title.kind, q);
+      if (!items.length) { showResultsMessage('No matches on TMDB for that search.'); return; }
+      clear(resultsBox);
+      for (const item of items) {
+        resultsBox.append(
+          el('button', {
+            class: 'modal__result', type: 'button',
+            onClick: (e) => applyMatch(item.tmdbId, e.currentTarget),
+          },
+            item.poster
+              ? el('img', { src: item.poster, alt: '', loading: 'lazy' })
+              : el('div', { class: 'modal__result-noart' }),
+            el('div', {},
+              el('p', { class: 'modal__result-title' }, item.title + (item.year ? ` (${item.year})` : '')),
+              el('p', { class: 'modal__result-overview' }, item.overview || 'No synopsis available.')))
+        );
       }
-    },
-  }, 'Re-fetch');
+    } catch (err) {
+      showResultsMessage(err.message || 'Search failed.');
+    }
+  }
+
+  searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); runSearch(); } });
+  const searchBtn = el('button', { class: 'btn btn--ghost btn--sm', type: 'button', onClick: runSearch }, 'Search');
 
   const saveBtn = el('button', {
     class: 'btn btn--corona', type: 'button',
@@ -293,7 +322,13 @@ function EditMetadataModal(title) {
       { class: 'modal__card' },
       el('h2', { class: 'modal__title' }, 'Edit metadata'),
       el('p', { class: 'modal__hint' },
-        `Changes here replace what ${title.kind === 'movie' ? 'TMDB' : 'the metadata provider'} sent, and stick — future scans leave a manually-edited title alone.`),
+        `Search TMDB and pick the right match, or edit the fields below by hand. Either way, this title stops updating itself on future scans.`),
+
+      el('div', { class: 'modal__search' }, searchInput, searchBtn),
+      resultsBox,
+
+      el('hr', { class: 'modal__divider' }),
+      el('p', { class: 'modal__hint' }, 'Or edit the fields directly:'),
 
       field('Title', titleInput),
       el('div', { class: 'modal__row' },
@@ -305,10 +340,6 @@ function EditMetadataModal(title) {
       field('Poster URL', posterInput),
       field('Backdrop URL', backdropInput),
 
-      el('hr', { class: 'modal__divider' }),
-      el('p', { class: 'modal__hint' }, 'Or point this at a different TMDB match entirely:'),
-      el('div', { class: 'modal__row' }, field('TMDB id', tmdbIdInput), el('div', { style: { display: 'flex', alignItems: 'flex-end' } }, rematchBtn)),
-
       el('div', { class: 'modal__actions' },
         el('button', { class: 'btn btn--ghost', type: 'button', onClick: close }, 'Cancel'),
         saveBtn)
@@ -317,6 +348,7 @@ function EditMetadataModal(title) {
 
   document.addEventListener('keydown', onKey);
   document.body.classList.add('is-locked');
+  runSearch();
 
   return modal;
 }

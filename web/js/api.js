@@ -64,6 +64,7 @@ export const api = {
   adminStatus: () => request('GET', '/api/admin/status'),
   adminScan: (full) => request('POST', '/api/admin/scan', { full }),
   adminUnmatched: () => request('GET', '/api/admin/unmatched'),
+  adminTmdbSearch: (kind, q) => request('GET', `/api/admin/tmdb-search?kind=${kind}&q=${encodeURIComponent(q)}`),
   adminMatchTitle: (id, tmdbId) => request('POST', `/api/admin/titles/${id}/match`, { tmdbId }),
   adminEditTitle: (id, body) => request('PATCH', `/api/admin/titles/${id}`, body),
   adminUsers: () => request('GET', '/api/admin/users'),

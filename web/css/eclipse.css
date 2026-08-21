@@ -593,6 +593,28 @@ a.tv-cursor, button.tv-cursor, [tabindex].tv-cursor {
   border: 0; border-top: 1px solid var(--hairline); margin: 24px 0;
 }
 
+.modal__search { display: flex; gap: 10px; margin-bottom: 14px; }
+.modal__search .input { flex: 1; }
+.modal__results {
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 320px; overflow-y: auto; margin-bottom: 4px;
+}
+.modal__result {
+  display: flex; gap: 12px; width: 100%; text-align: left;
+  padding: 8px; border-radius: var(--radius-sm); border: 1px solid transparent;
+  background: none; cursor: pointer; transition: background 0.15s, border-color 0.15s;
+}
+.modal__result:hover, .modal__result:focus-visible { background: var(--surface-3); border-color: var(--hairline-strong); outline: none; }
+.modal__result img, .modal__result-noart {
+  width: 46px; height: 69px; flex-shrink: 0; border-radius: 5px; object-fit: cover;
+  background: var(--surface-3);
+}
+.modal__result-title { font-size: 13.5px; font-weight: 600; margin: 0 0 4px; }
+.modal__result-overview {
+  font-size: 12px; color: var(--text-faint); line-height: 1.45; margin: 0;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+
 /* ===================== player ===================== */
 
 .player {
