@@ -39,8 +39,16 @@
 // :hover) — a remote can reach every card directly, so they'd only ever be
 // focused as an invisible, confusing dead stop. The brand mark links home,
 // which from home is a no-op — selectable-but-does-nothing is worse than
-// not selectable, so it's excluded the same way.
-const FOCUSABLE = 'a[href]:not(.brand), button:not([disabled]):not(.row__arrow), [tabindex]:not([tabindex="-1"]):not([disabled]), input:not([disabled]), select:not([disabled])';
+// not selectable, so it's excluded the same way. A row's "See all" link
+// sits in the row's *header*, well above its cards — a genuinely separate
+// document position, not just a visual quirk — so every row grouping this
+// module could ever draw would put it in its own band, one full row above
+// the cards it belongs to. That turned "press Down once to reach the next
+// shelf" into "press Down twice, past a stop that reads as nothing
+// happening" on every single genre row, which is most of them. Genre
+// browsing is still fully reachable with a remote (Films/Series → the
+// genre dropdown), just not as a per-row detour through its own header.
+const FOCUSABLE = 'a[href]:not(.brand):not(.row__more), button:not([disabled]):not(.row__arrow), [tabindex]:not([tabindex="-1"]):not([disabled]), input:not([disabled]), select:not([disabled])';
 
 const OVERLAP_SLACK = 2; // px — rows whose bands just graze each other still count as separate
 
@@ -142,17 +150,6 @@ function findPosition(rows, active) {
   return null;
 }
 
-function nearestByX(items, x) {
-  let best = null;
-  let bestDist = Infinity;
-  for (const it of items) {
-    const cx = it.rect.left + it.rect.width / 2;
-    const dist = Math.abs(cx - x);
-    if (dist < bestDist) { bestDist = dist; best = it; }
-  }
-  return best?.el || null;
-}
-
 function setCursor(el) {
   if (!el || el === cursor) return;
   if (cursor) cursor.classList.remove('tv-cursor');
@@ -208,8 +205,12 @@ function moveFocus(key) {
   } else {
     const targetRow = rows[r + (key === 'ArrowUp' ? -1 : 1)];
     if (!targetRow) return;
-    const currentX = row.items[idx].rect.left + row.items[idx].rect.width / 2;
-    setCursor(nearestByX(targetRow.items, currentX));
+    // Always the row's first (leftmost) item, not whatever happens to sit
+    // nearest the old X position — a shelf you'd scrolled into landing you
+    // deep into the *next* shelf too reads as arbitrary, and means the new
+    // row doesn't visibly start from its own beginning the way every real
+    // streaming app's row-to-row navigation does.
+    setCursor(targetRow.items[0]?.el);
   }
 }
 

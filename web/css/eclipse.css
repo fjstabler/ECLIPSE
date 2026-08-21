@@ -311,7 +311,11 @@ a.tv-cursor, button.tv-cursor, [tabindex].tv-cursor {
 .card {
   position: relative; flex: 0 0 auto; width: clamp(132px, 13vw, 186px);
   scroll-snap-align: start; cursor: pointer;
-  transition: transform 0.28s var(--ease), z-index 0s;
+  /* Fast enough that stepping through several cards in a row reads as
+     snappy, not as a queue of quarter-second animations stacking up
+     behind each other — the thing that made D-pad/arrow-key browsing
+     feel sluggish compared to Netflix/Disney+'s near-instant response. */
+  transition: transform 0.15s var(--ease), z-index 0s;
   border: 0; padding: 0; background: none; text-align: left;
 }
 .card:hover, .card:focus-visible, .card.tv-cursor { transform: scale(1.07) translateY(-4px); z-index: 20; outline: none; }
@@ -323,7 +327,7 @@ a.tv-cursor, button.tv-cursor, [tabindex].tv-cursor {
   position: relative; aspect-ratio: 2 / 3; border-radius: var(--radius);
   overflow: hidden; background: var(--surface-2);
   box-shadow: var(--shadow-card);
-  transition: box-shadow 0.28s var(--ease);
+  transition: box-shadow 0.15s var(--ease);
 }
 .card:hover .card__art { box-shadow: var(--shadow-pop); }
 .card__art img { width: 100%; height: 100%; object-fit: cover; }
@@ -332,14 +336,14 @@ a.tv-cursor, button.tv-cursor, [tabindex].tv-cursor {
   position: absolute; inset: 0; opacity: 0;
   background: linear-gradient(180deg, rgba(0,0,0,0) 40%, rgba(0,0,0,0.88));
   display: flex; flex-direction: column; justify-content: flex-end; padding: 10px;
-  transition: opacity 0.24s var(--ease);
+  transition: opacity 0.15s var(--ease);
 }
 .card:hover .card__overlay, .card:focus-visible .card__overlay { opacity: 1; }
 .card__play {
   position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0.7);
   width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center;
   background: rgba(255,255,255,0.94); color: #0a0a0f;
-  opacity: 0; transition: opacity 0.24s var(--ease), transform 0.24s var(--ease);
+  opacity: 0; transition: opacity 0.15s var(--ease), transform 0.15s var(--ease);
 }
 .card:hover .card__play { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 .card__play svg { width: 20px; height: 20px; margin-left: 2px; }
