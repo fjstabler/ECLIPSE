@@ -113,6 +113,22 @@ CREATE TABLE IF NOT EXISTS subtitles (
   UNIQUE (media_file_id, path)
 );
 
+-- Embedded audio tracks, from ffprobe. track_index is 0-based among audio
+-- streams only, matching ffmpeg's own "0:a:N" stream-map syntax exactly —
+-- that's what the transcode route passes straight through when a viewer
+-- picks a language.
+CREATE TABLE IF NOT EXISTS audio_tracks (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  media_file_id INTEGER NOT NULL REFERENCES media_files(id) ON DELETE CASCADE,
+  track_index   INTEGER NOT NULL,
+  codec         TEXT,
+  language      TEXT,
+  label         TEXT,
+  channels      INTEGER,
+  is_default    INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (media_file_id, track_index)
+);
+
 -- ---------------------------------------------------------------------------
 -- Users and profiles
 -- ---------------------------------------------------------------------------

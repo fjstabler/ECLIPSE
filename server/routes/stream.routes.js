@@ -108,6 +108,11 @@ router.get('/transcode/:fileId', requireAuth, (req, res) => {
   const startAt = Math.max(0, Number(req.query.t) || 0);
   const forceVideo = req.query.mode === 'full';
 
+  // A specific language track, chosen in the player. Left unset, ffmpeg
+  // picks its own default — same behaviour as before this existed.
+  const audioTrack = req.query.audio !== undefined ? Number(req.query.audio) : null;
+  const audioMap = Number.isInteger(audioTrack) && audioTrack >= 0 ? ['-map', '0:v:0', '-map', `0:a:${audioTrack}`] : [];
+
   // Copy the video stream unless the codec can't play in a browser.
   const videoArgs =
     forceVideo || !['h264', 'vp8', 'vp9', 'av1'].includes(file.video_codec || 'h264')
@@ -119,6 +124,7 @@ router.get('/transcode/:fileId', requireAuth, (req, res) => {
     '-loglevel', 'error',
     ...(startAt > 0 ? ['-ss', String(startAt)] : []),
     '-i', file.path,
+    ...audioMap,
     ...videoArgs,
     '-c:a', 'aac',
     '-ac', '2',

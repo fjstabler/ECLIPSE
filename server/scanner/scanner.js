@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { db } from '../db.js';
 import { config, VIDEO_EXTENSIONS, DIRECT_PLAY_EXTENSIONS, SUBTITLE_EXTENSIONS } from '../config.js';
-import { parseMovie, parseEpisode, sortTitle, parseSubtitleLanguage } from '../util/parse.js';
+import { parseMovie, parseEpisode, sortTitle, parseSubtitleLanguage, LANGUAGE_NAMES } from '../util/parse.js';
 import * as tmdb from '../metadata/tmdb.js';
 import { cacheImage, placeholderPoster, placeholderBackdrop } from '../metadata/artwork.js';
 
@@ -50,13 +50,28 @@ async function probe(filePath) {
     );
     const data = JSON.parse(stdout);
     const video = (data.streams || []).find((s) => s.codec_type === 'video');
-    const audio = (data.streams || []).find((s) => s.codec_type === 'audio');
+    const audioStreams = (data.streams || []).filter((s) => s.codec_type === 'audio');
+    const audio = audioStreams[0];
     return {
       duration: data.format?.duration ? Number(data.format.duration) : null,
       width: video?.width || null,
       height: video?.height || null,
       videoCodec: video?.codec_name || null,
       audioCodec: audio?.codec_name || null,
+      // track_index is the position among audio streams only (0, 1, 2…) —
+      // deliberately not ffprobe's absolute stream index, because that's
+      // what ffmpeg's own "-map 0:a:N" wants when a track gets selected.
+      audioTracks: audioStreams.map((s, i) => {
+        const lang = (s.tags?.language || '').toLowerCase() || null;
+        return {
+          trackIndex: i,
+          codec: s.codec_name || null,
+          language: lang && lang !== 'und' ? lang : null,
+          label: s.tags?.title || (lang ? LANGUAGE_NAMES[lang] : null) || (lang ? lang.toUpperCase() : `Track ${i + 1}`),
+          channels: s.channels || null,
+          isDefault: s.disposition?.default === 1,
+        };
+      }),
     };
   } catch {
     return null;
@@ -102,12 +117,23 @@ const findTitleByTmdb = db.prepare('SELECT * FROM titles WHERE kind = ? AND tmdb
 const findTitleByName = db.prepare(
   'SELECT * FROM titles WHERE kind = ? AND sort_title = ? AND (year IS ? OR ? IS NULL)'
 );
+const findTitleById = db.prepare('SELECT * FROM titles WHERE id = ?');
 
-function upsertTitle({ kind, title, year, meta }) {
+/**
+ * `existingTitleId` is the title this exact file was already attached to,
+ * from before this scan touched it — checked first and, when present, wins
+ * outright. Name/year matching is only a fallback for a file scanned for
+ * the first time; for a file scanned before, trusting it over the freshly
+ * re-parsed filename is what stops an edited title (manual or a TMDB match
+ * whose display name doesn't match the file) from drifting away from its
+ * own file on the next scan and leaving both an orphaned title and a fresh
+ * duplicate behind.
+ */
+function upsertTitle({ kind, title, year, meta, existingTitleId }) {
   const sort = sortTitle(title);
 
-  let existing = null;
-  if (meta?.tmdbId) existing = findTitleByTmdb.get(kind, meta.tmdbId);
+  let existing = existingTitleId ? findTitleById.get(existingTitleId) : null;
+  if (!existing && meta?.tmdbId) existing = findTitleByTmdb.get(kind, meta.tmdbId);
   if (!existing) existing = findTitleByName.get(kind, sort, year ?? null, year ?? null);
 
   const fields = {
@@ -135,9 +161,12 @@ function upsertTitle({ kind, title, year, meta }) {
   if (!fields.backdrop) fields.backdrop = placeholderBackdrop(fields.title);
 
   if (existing) {
-    // Never downgrade a matched title back to unmatched on a rescan.
-    if (existing.metadata_state === 'manual') return existing.id;
-    if (!meta && existing.metadata_state === 'matched') return existing.id;
+    // Never downgrade a matched title back to unmatched on a rescan. A
+    // manual title also keeps whatever tags it has — genres included —
+    // which is why the caller checks `manual` before ever calling
+    // replaceTags(), not just whether it got a fresh title/overview/etc.
+    if (existing.metadata_state === 'manual') return { id: existing.id, manual: true };
+    if (!meta && existing.metadata_state === 'matched') return { id: existing.id, manual: false };
 
     db.prepare(`
       UPDATE titles SET title=@title, sort_title=@sort_title, original_title=@original_title, year=@year,
@@ -146,7 +175,7 @@ function upsertTitle({ kind, title, year, meta }) {
         tmdb_id=@tmdb_id, imdb_id=@imdb_id, metadata_state=@metadata_state, updated_at=datetime('now')
       WHERE id=@id
     `).run({ ...fields, id: existing.id });
-    return existing.id;
+    return { id: existing.id, manual: false };
   }
 
   const info = db.prepare(`
@@ -155,7 +184,7 @@ function upsertTitle({ kind, title, year, meta }) {
     VALUES (@kind, @title, @sort_title, @original_title, @year, @overview, @tagline, @runtime, @rating,
       @certification, @status, @poster, @backdrop, @logo, @trailer_url, @tmdb_id, @imdb_id, @metadata_state)
   `).run(fields);
-  return info.lastInsertRowid;
+  return { id: info.lastInsertRowid, manual: false };
 }
 
 function replaceTags(titleId, tags) {
@@ -247,8 +276,9 @@ const getFileByPath = db.prepare('SELECT * FROM media_files WHERE path = ?');
 async function ingestMovie(filePath, stat) {
   const parsed = parseMovie(filePath);
   const meta = await lookupMovie(parsed.title, parsed.year);
-  const titleId = upsertTitle({ kind: 'movie', title: parsed.title, year: parsed.year, meta });
-  if (meta?.tags) replaceTags(titleId, meta.tags);
+  const existingTitleId = getFileByPath.get(filePath)?.title_id || null;
+  const { id: titleId, manual } = upsertTitle({ kind: 'movie', title: parsed.title, year: parsed.year, meta, existingTitleId });
+  if (meta?.tags && !manual) replaceTags(titleId, meta.tags);
   await attachFile({ filePath, stat, titleId, episodeId: null });
   return titleId;
 }
@@ -258,8 +288,9 @@ async function ingestEpisode(filePath, stat, libraryRoot) {
   if (!parsed) return null;
 
   const meta = await lookupSeries(parsed.series, parsed.seriesYear);
-  const titleId = upsertTitle({ kind: 'series', title: parsed.series, year: parsed.seriesYear, meta });
-  if (meta?.tags) replaceTags(titleId, meta.tags);
+  const existingTitleId = getFileByPath.get(filePath)?.title_id || null;
+  const { id: titleId, manual } = upsertTitle({ kind: 'series', title: parsed.series, year: parsed.seriesYear, meta, existingTitleId });
+  if (meta?.tags && !manual) replaceTags(titleId, meta.tags);
 
   // Season row
   let seasonMeta = null;
@@ -357,6 +388,20 @@ async function attachFile({ filePath, stat, titleId, episodeId }) {
     db.prepare(
       'INSERT OR IGNORE INTO subtitles (media_file_id, path, language, label, forced) VALUES (?, ?, ?, ?, ?)'
     ).run(fileRow.id, s.path, s.language, s.label, s.forced ? 1 : 0);
+  }
+
+  // Embedded audio tracks — only known when this pass actually re-probed the
+  // file (a fresh probe reflects reality; an unchanged file keeps whatever
+  // was found last time, so there's nothing to replace it with here).
+  if (probed?.audioTracks) {
+    db.prepare('DELETE FROM audio_tracks WHERE media_file_id = ?').run(fileRow.id);
+    const insertTrack = db.prepare(`
+      INSERT INTO audio_tracks (media_file_id, track_index, codec, language, label, channels, is_default)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const t of probed.audioTracks) {
+      insertTrack.run(fileRow.id, t.trackIndex, t.codec, t.language, t.label, t.channels, t.isDefault ? 1 : 0);
+    }
   }
 
   return { fileRow, isNew: !existing };

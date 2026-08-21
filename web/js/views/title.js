@@ -1,5 +1,6 @@
 import { el, icon, clear, formatRuntime, formatTime, initials, toast } from '../ui.js';
 import { api } from '../api.js';
+import { state } from '../state.js';
 import { Row } from '../components/row.js';
 import { openPlayer } from '../components/player.js';
 import { openNova } from '../components/nova.js';
@@ -87,7 +88,13 @@ export async function TitleView({ params, outlet }) {
         el('button', {
           class: 'btn btn--ghost btn--sm', type: 'button',
           onClick: () => openNova(`Find me something like ${title.title}`),
-        }, el('span', { class: 'nova-orb' }), 'More like this')
+        }, el('span', { class: 'nova-orb' }), 'More like this'),
+        state.user?.is_admin
+          ? el('button', {
+              class: 'btn btn--ghost btn--icon', type: 'button', 'aria-label': 'Edit metadata', title: 'Edit metadata',
+              onClick: () => document.body.append(EditMetadataModal(title)),
+            }, icon('edit'))
+          : null
       )
     )
   );
@@ -203,4 +210,113 @@ function EpisodeBrowser(title) {
     el('p', { class: 'detail__label' }, 'EPISODES'),
     bar,
     list);
+}
+
+/**
+ * Admin-only: edit a title's metadata by hand, or point it at a different
+ * TMDB match. Either path marks the title 'manual', so the next scan won't
+ * quietly overwrite what was just typed in.
+ */
+function EditMetadataModal(title) {
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  const close = () => {
+    modal.remove();
+    document.body.classList.remove('is-locked');
+    document.removeEventListener('keydown', onKey);
+  };
+
+  const field = (labelText, input) =>
+    el('div', { class: 'modal__field' }, el('label', {}, labelText), input);
+
+  const titleInput = el('input', { class: 'input', value: title.title });
+  const yearInput = el('input', { class: 'input', type: 'number', value: title.year || '' });
+  const taglineInput = el('input', { class: 'input', value: title.tagline || '' });
+  const certInput = el('input', { class: 'input', value: title.certification || '', placeholder: 'e.g. 15, PG-13' });
+  const genresInput = el('input', { class: 'input', value: (title.genres || []).join(', '), placeholder: 'Comma separated' });
+  // A <textarea>'s initial text has to be a child node, not a "value"
+  // attribute — the attribute is inert on this element.
+  const overviewInput = el('textarea', { class: 'input' }, title.overview || '');
+  const posterInput = el('input', { class: 'input', value: title.poster || '', placeholder: 'https://…' });
+  const backdropInput = el('input', { class: 'input', value: title.backdrop || '', placeholder: 'https://…' });
+
+  const tmdbIdInput = el('input', { class: 'input', type: 'number', placeholder: 'e.g. 27205' });
+  const rematchBtn = el('button', {
+    class: 'btn btn--ghost btn--sm', type: 'button',
+    onClick: async () => {
+      const tmdbId = Number(tmdbIdInput.value);
+      if (!tmdbId) { toast('Enter a TMDB id first'); return; }
+      rematchBtn.disabled = true;
+      try {
+        await api.adminMatchTitle(title.id, tmdbId);
+        toast('Re-fetched from TMDB');
+        close();
+        navigate(`/title/${title.id}`);
+      } catch (err) {
+        toast(err.message || 'Could not fetch that TMDB id');
+      } finally {
+        rematchBtn.disabled = false;
+      }
+    },
+  }, 'Re-fetch');
+
+  const saveBtn = el('button', {
+    class: 'btn btn--corona', type: 'button',
+    onClick: async () => {
+      saveBtn.disabled = true;
+      try {
+        await api.adminEditTitle(title.id, {
+          title: titleInput.value,
+          year: yearInput.value,
+          tagline: taglineInput.value,
+          certification: certInput.value,
+          overview: overviewInput.value,
+          poster: posterInput.value,
+          backdrop: backdropInput.value,
+          genres: genresInput.value.split(',').map((g) => g.trim()).filter(Boolean),
+        });
+        toast('Saved');
+        close();
+        navigate(`/title/${title.id}`);
+      } catch (err) {
+        toast(err.message || 'Could not save those changes');
+      } finally {
+        saveBtn.disabled = false;
+      }
+    },
+  }, 'Save changes');
+
+  const modal = el(
+    'div',
+    { class: 'modal', onClick: (e) => { if (e.target === modal) close(); } },
+    el(
+      'div',
+      { class: 'modal__card' },
+      el('h2', { class: 'modal__title' }, 'Edit metadata'),
+      el('p', { class: 'modal__hint' },
+        `Changes here replace what ${title.kind === 'movie' ? 'TMDB' : 'the metadata provider'} sent, and stick — future scans leave a manually-edited title alone.`),
+
+      field('Title', titleInput),
+      el('div', { class: 'modal__row' },
+        field('Year', yearInput),
+        field('Certification', certInput)),
+      field('Tagline', taglineInput),
+      field('Genres', genresInput),
+      field('Synopsis', overviewInput),
+      field('Poster URL', posterInput),
+      field('Backdrop URL', backdropInput),
+
+      el('hr', { class: 'modal__divider' }),
+      el('p', { class: 'modal__hint' }, 'Or point this at a different TMDB match entirely:'),
+      el('div', { class: 'modal__row' }, field('TMDB id', tmdbIdInput), el('div', { style: { display: 'flex', alignItems: 'flex-end' } }, rematchBtn)),
+
+      el('div', { class: 'modal__actions' },
+        el('button', { class: 'btn btn--ghost', type: 'button', onClick: close }, 'Cancel'),
+        saveBtn)
+    )
+  );
+
+  document.addEventListener('keydown', onKey);
+  document.body.classList.add('is-locked');
+
+  return modal;
 }

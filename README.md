@@ -117,6 +117,15 @@ brew install ffmpeg
 Without ffmpeg, `.mkv` files appear in the library but won't play. Set
 `ECLIPSE_TRANSCODE=false` to disable conversion entirely.
 
+**Multiple audio languages.** A file with more than one audio track — common
+for `.mkv` releases — gets a language button in the player. For files the
+browser plays directly, switching is instant, through the browser's own
+audio track list. For everything remuxed through ffmpeg, switching restarts
+the stream at the current position with the chosen track, the same way
+seeking already works. Track languages come from whatever the file itself
+is tagged with; a file scanned before this existed picks its tracks up on
+the next `npm run scan -- --full`.
+
 **Player keyboard shortcuts**
 
 | Key | Action | Key | Action |
@@ -124,7 +133,7 @@ Without ffmpeg, `.mkv` files appear in the library but won't play. Set
 | `Space` / `K` | Play or pause | `F` | Fullscreen |
 | `←` / `→` | Skip 10 seconds | `M` | Mute |
 | `↑` / `↓` | Volume | `C` | Cycle subtitles |
-| `Esc` | Close player | | |
+| `A` | Cycle audio language | `Esc` | Close player |
 
 Elsewhere: `/` opens search, `N` toggles N.O.V.A.
 
@@ -208,6 +217,15 @@ same. Everything works; it just looks plainer.
 
 Artwork is cached to disk, so the interface stays fast and keeps working if TMDB
 is unreachable.
+
+**Got the wrong match, or want to write your own?** An administrator can edit
+any title by hand — open it and use the edit (pencil) button next to the
+other actions. You can rewrite the title, year, synopsis, tagline,
+certification, genres, poster and backdrop directly, or just point it at a
+different TMDB id if the automatic match picked the wrong one. Either way,
+it's marked so future scans leave it alone rather than quietly overwriting
+what you typed — reverting is a matter of clearing the fields you changed
+and re-matching against TMDB.
 
 ---
 

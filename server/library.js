@@ -308,6 +308,12 @@ export function getSubtitles(mediaFileId) {
   return db.prepare('SELECT * FROM subtitles WHERE media_file_id = ?').all(mediaFileId);
 }
 
+export function getAudioTracks(mediaFileId) {
+  return db
+    .prepare('SELECT * FROM audio_tracks WHERE media_file_id = ? ORDER BY track_index')
+    .all(mediaFileId);
+}
+
 /** Playback context: what is this file, and what plays after it? */
 export function playbackContext(fileId, userId) {
   const file = getMediaFile(fileId);
@@ -343,6 +349,9 @@ export function playbackContext(fileId, userId) {
     next,
     position: state?.position || 0,
     subtitles: getSubtitles(fileId).map((s) => ({ id: s.id, label: s.label, language: s.language, forced: s.forced === 1 })),
+    audioTracks: getAudioTracks(fileId).map((t) => ({
+      trackIndex: t.track_index, label: t.label, language: t.language, channels: t.channels, isDefault: t.is_default === 1,
+    })),
   };
 }
 

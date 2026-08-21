@@ -230,7 +230,7 @@ export function parseSubtitleLanguage(filePath) {
   return { language: 'und', label: 'Subtitles', forced };
 }
 
-const LANGUAGE_NAMES = {
+export const LANGUAGE_NAMES = {
   en: 'English', eng: 'English', fr: 'French', fre: 'French', de: 'German', ger: 'German',
   es: 'Spanish', spa: 'Spanish', it: 'Italian', ita: 'Italian', pt: 'Portuguese', nl: 'Dutch',
   sv: 'Swedish', no: 'Norwegian', da: 'Danish', fi: 'Finnish', pl: 'Polish', ru: 'Russian',

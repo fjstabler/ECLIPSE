@@ -32,6 +32,7 @@ class Player {
     this.startAt = startAt;
     this.mode = 'direct';
     this.transcodeOffset = 0;
+    this.audioTrackIndex = null; // null = server/browser default
     this.watchedSeconds = 0;
     this.lastTick = 0;
     this.destroyed = false;
@@ -85,7 +86,8 @@ class Player {
       // The remux starts at the requested offset, so the element's own clock
       // begins at zero and we add the offset back when displaying time.
       this.transcodeOffset = position;
-      this.video.src = `/api/stream/transcode/${this.fileId}?t=${Math.floor(position)}`;
+      const audio = this.audioTrackIndex != null ? `&audio=${this.audioTrackIndex}` : '';
+      this.video.src = `/api/stream/transcode/${this.fileId}?t=${Math.floor(position)}${audio}`;
     }
     this.video.load();
     const p = this.video.play();
@@ -133,6 +135,16 @@ class Player {
           el('span', { html: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M7 14h4M13 14h4" stroke-linecap="round"/></svg>' }))
       : null;
 
+    // Hidden until we actually know there's more than one track — for a
+    // remux that's immediate (ffprobe already knows); for direct play it
+    // depends on what the browser itself finds once the file loads.
+    this.audioBtn = el(
+      'button',
+      { class: 'pbtn', type: 'button', title: 'Audio language', hidden: true, onClick: () => this.cycleAudioTrack() },
+      icon('language')
+    );
+    if (this.mode === 'transcode') this.audioBtn.hidden = (this.ctx.audioTracks || []).length < 2;
+
     this.ui = el(
       'div',
       { class: 'player__ui' },
@@ -163,6 +175,7 @@ class Player {
           el('button', { class: 'pbtn', type: 'button', 'aria-label': 'Forward 10 seconds', onClick: () => this.skip(10) }, icon('fwd10')),
           this.timeLabel,
           el('div', { class: 'player__spacer' }),
+          this.audioBtn,
           subBtn,
           el('div', { class: 'player__volume' }, this.muteBtn, this.volumeInput),
           this.fsBtn
@@ -192,6 +205,12 @@ class Player {
   bindVideo() {
     const v = this.video;
 
+    v.addEventListener('loadedmetadata', () => {
+      // Direct play never touches the server for this — the browser's own
+      // demuxer either exposes multiple tracks or it doesn't, and that's
+      // only known once the file has actually loaded.
+      if (this.mode === 'direct') this.audioBtn.hidden = (v.audioTracks?.length || 0) < 2;
+    });
     v.addEventListener('play', () => { this.playBtn.innerHTML = ''; this.playBtn.append(icon('pause')); });
     v.addEventListener('pause', () => { this.playBtn.innerHTML = ''; this.playBtn.append(icon('play')); });
     v.addEventListener('timeupdate', () => this.tick());
@@ -307,6 +326,36 @@ class Player {
     }
   }
 
+  /**
+   * Direct play switches instantly, through the browser's own AudioTrack
+   * list (Chromium-based browsers; not universally supported, hence the
+   * length check rather than assuming it exists). A remux has no such API —
+   * the choice has to be baked into the stream itself, so it restarts the
+   * pipe at the current position with a different track mapped in, the same
+   * way seeking already does.
+   */
+  cycleAudioTrack() {
+    if (this.mode === 'direct') {
+      const tracks = this.video.audioTracks;
+      if (!tracks || tracks.length < 2) return;
+      const arr = Array.from(tracks);
+      const activeIndex = Math.max(0, arr.findIndex((t) => t.enabled));
+      const nextIndex = (activeIndex + 1) % arr.length;
+      arr.forEach((t, i) => { t.enabled = i === nextIndex; });
+      const t = arr[nextIndex];
+      toast(`Audio: ${t.label || t.language || `Track ${nextIndex + 1}`}`);
+      return;
+    }
+
+    const tracks = this.ctx.audioTracks || [];
+    if (tracks.length < 2) return;
+    const currentIndex = Math.max(0, tracks.findIndex((t) => t.trackIndex === this.audioTrackIndex));
+    const next = tracks[(currentIndex + 1) % tracks.length];
+    this.audioTrackIndex = next.trackIndex;
+    toast(`Audio: ${next.label}`);
+    this.attachSource(this.currentTime);
+  }
+
   showNextCard() {
     const n = this.nextEpisode;
     this.nextCard = el(
@@ -374,6 +423,7 @@ class Player {
         case 'f': this.toggleFullscreen(); break;
         case 'm': this.toggleMute(); break;
         case 'c': this.cycleSubtitles(); break;
+        case 'a': this.cycleAudioTrack(); break;
         case 'Escape': if (!document.fullscreenElement) closePlayer(); break;
         default: break;
       }

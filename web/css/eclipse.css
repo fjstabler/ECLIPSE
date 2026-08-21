@@ -567,6 +567,32 @@ a.tv-cursor, button.tv-cursor, [tabindex].tv-cursor {
 }
 .scrim.is-open { opacity: 1; pointer-events: auto; }
 
+/* ===================== modal ===================== */
+
+.modal {
+  position: fixed; inset: 0; z-index: 320; display: flex; align-items: center;
+  justify-content: center; padding: 24px; background: rgba(5,5,8,0.72);
+  animation: fadeIn 0.2s var(--ease);
+}
+.modal__card {
+  width: min(560px, 100%); max-height: 88vh; overflow-y: auto;
+  background: var(--surface-2); border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius-lg); padding: 28px; box-shadow: var(--shadow-pop);
+}
+.modal__title { font-size: 20px; font-weight: 700; margin: 0 0 4px; }
+.modal__hint { font-size: 13px; color: var(--text-faint); margin: 0 0 20px; line-height: 1.5; }
+.modal__field { margin-bottom: 14px; }
+.modal__field label {
+  display: block; font-size: 11.5px; font-weight: 700; letter-spacing: 0.06em;
+  color: var(--text-faint); margin-bottom: 6px; text-transform: uppercase;
+}
+.modal__row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.modal__field textarea.input { resize: vertical; min-height: 80px; font-family: inherit; }
+.modal__actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 22px; }
+.modal__divider {
+  border: 0; border-top: 1px solid var(--hairline); margin: 24px 0;
+}
+
 /* ===================== player ===================== */
 
 .player {

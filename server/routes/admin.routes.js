@@ -4,9 +4,11 @@ import { db } from '../db.js';
 import { requireAdmin } from '../auth.js';
 import { config } from '../config.js';
 import { runScan, scanStatus } from '../scanner/scanner.js';
-import { libraryStats, listTitles } from '../library.js';
+import { libraryStats, listTitles, getTitle } from '../library.js';
 import { hasTmdb } from '../metadata/tmdb.js';
 import { novaAvailable } from '../nova/openai.js';
+import { sortTitle } from '../util/parse.js';
+import { cacheImage } from '../metadata/artwork.js';
 
 export const router = express.Router();
 router.use(requireAdmin);
@@ -96,6 +98,62 @@ router.post('/titles/:id/match', async (req, res) => {
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
+});
+
+/**
+ * Edit a title's metadata by hand — title, year, overview, artwork, genres.
+ * Marks the title 'manual' so a future scan won't overwrite what was typed
+ * in, the same protection re-matching against TMDB already gets.
+ */
+router.patch('/titles/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare('SELECT * FROM titles WHERE id = ?').get(id);
+  if (!existing) return res.status(404).json({ error: 'Title not found' });
+
+  const b = req.body || {};
+  const next = { ...existing };
+
+  if (typeof b.title === 'string') {
+    const trimmed = b.title.trim();
+    if (!trimmed) return res.status(400).json({ error: 'Title cannot be empty' });
+    next.title = trimmed;
+  }
+  if ('year' in b) next.year = b.year === '' || b.year == null ? null : Number(b.year) || null;
+  if (typeof b.overview === 'string') next.overview = b.overview.trim() || null;
+  if (typeof b.tagline === 'string') next.tagline = b.tagline.trim() || null;
+  if (typeof b.certification === 'string') next.certification = b.certification.trim() || null;
+  if (typeof b.status === 'string') next.status = b.status.trim() || null;
+
+  // Only re-cache artwork when the URL actually changed — cacheImage() is a
+  // network fetch, and a save shouldn't re-download an image that's already
+  // sitting in the cache under the same address.
+  if (typeof b.poster === 'string' && b.poster.trim() !== (existing.poster || '')) {
+    next.poster = b.poster.trim() ? await cacheImage(b.poster.trim()) : null;
+  }
+  if (typeof b.backdrop === 'string' && b.backdrop.trim() !== (existing.backdrop || '')) {
+    next.backdrop = b.backdrop.trim() ? await cacheImage(b.backdrop.trim()) : null;
+  }
+
+  db.prepare(`
+    UPDATE titles SET
+      title=@title, sort_title=@sort_title, year=@year, overview=@overview, tagline=@tagline,
+      certification=@certification, status=@status, poster=@poster, backdrop=@backdrop,
+      metadata_state='manual', updated_at=datetime('now')
+    WHERE id=@id
+  `).run({ ...next, sort_title: sortTitle(next.title), id });
+
+  if (Array.isArray(b.genres)) {
+    db.prepare("DELETE FROM title_tags WHERE title_id = ? AND tag_type = 'genre'").run(id);
+    const insert = db.prepare(
+      'INSERT OR REPLACE INTO title_tags (title_id, tag_type, tag_value, weight, ordering) VALUES (?, ?, ?, ?, ?)'
+    );
+    b.genres.forEach((g, i) => {
+      const value = String(g).trim();
+      if (value) insert.run(id, 'genre', value, 1, i);
+    });
+  }
+
+  res.json({ ok: true, title: getTitle(id) });
 });
 
 router.get('/users', (req, res) => {
