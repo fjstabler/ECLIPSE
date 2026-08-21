@@ -46,21 +46,59 @@ const OVERLAP_SLACK = 2; // px — rows whose bands just graze each other still 
 
 let cursor = null;
 
+function isTvMode() {
+  return document.documentElement.classList.contains('tv-mode');
+}
+
 function isVisible(el) {
   if (!el || el.disabled) return false;
   if (el.offsetParent === null && getComputedStyle(el).position !== 'fixed') return false;
+  // N.O.V.A. stays mounted after closing — closeNova() only drops the
+  // .is-open class that slides it off-screen via transform, which doesn't
+  // touch offsetParent or give it a zero-size box, so without this its
+  // buttons would silently stay reachable (and re-activatable) forever
+  // after the first time it's ever opened.
+  if (el.closest('.nova:not(.is-open)')) return false;
   const rect = el.getBoundingClientRect();
   return rect.width > 0 || rect.height > 0;
 }
 
+// Every place content floats on top of the rest of the page while it's
+// open — highest z-index first. The background stays fully in the DOM,
+// just visually covered, so without this the cursor could wander behind
+// whichever of these is open right into content the viewer can't even see.
+const OVERLAY_SELECTORS = ['.player__menu', '.modal', '.nova.is-open', '.searchbar'];
+
+function activeOverlay() {
+  for (const sel of OVERLAY_SELECTORS) {
+    const el = document.querySelector(sel);
+    if (el) return el;
+  }
+  return null;
+}
+
 function candidates() {
-  // A player track menu (audio/subtitle picker) is the one place content
-  // floats on top of the player while it's open — scope navigation to just
-  // its items, or the background page (still fully in the DOM, just
-  // visually covered by the player) would be reachable right past it.
-  const menu = document.querySelector('.player__menu');
-  const scope = menu || document;
-  return Array.from(scope.querySelectorAll(FOCUSABLE)).filter(isVisible);
+  const overlay = activeOverlay();
+  if (overlay) return Array.from(overlay.querySelectorAll(FOCUSABLE)).filter(isVisible);
+
+  // With no overlay open, a TV remote still needs some way to reach the
+  // player's own buttons (audio, subtitles, fullscreen, mute, close) — on
+  // desktop those are mouse-clickable and this scoping doesn't apply.
+  if (isTvMode()) {
+    const playerUi = document.querySelector('.player__ui');
+    if (playerUi) return Array.from(playerUi.querySelectorAll(FOCUSABLE)).filter(isVisible);
+  }
+
+  return Array.from(document.querySelectorAll(FOCUSABLE)).filter(isVisible);
+}
+
+/** Move the D-pad cursor straight to the first item in a just-opened
+ * overlay, so the menu/modal reads as already-focused rather than waiting
+ * for a first arrow press to land somewhere. Desktop-only overlays (opened
+ * by mouse) are untouched unless this is actually called. */
+export function focusFirstIn(container) {
+  const items = Array.from(container.querySelectorAll(FOCUSABLE)).filter(isVisible);
+  if (items.length) setCursor(groupIntoRows(items)[0]?.items[0]?.el || items[0]);
 }
 
 /** Position used for row clustering — real document position, except the
@@ -136,6 +174,19 @@ function setCursor(el) {
 }
 
 function moveFocus(key) {
+  // The player's own control row (no explicit menu/modal open over it) is
+  // "ambient" rather than something the viewer deliberately opened — Left
+  // and Right stay reserved for the player's direct ±10s seek there until
+  // a control is already D-pad-focused, so a plain seek press doesn't
+  // silently drop a cursor onto a button nobody asked to navigate to. Up
+  // and Down have no such direct meaning on a TV remote (volume is normally
+  // hardware/CEC-controlled), so they always engage control navigation.
+  if (!activeOverlay() && isTvMode()) {
+    const playerUi = document.querySelector('.player__ui');
+    const engaged = playerUi && cursor && playerUi.contains(cursor);
+    if (playerUi && !engaged && (key === 'ArrowLeft' || key === 'ArrowRight')) return;
+  }
+
   const all = candidates();
   if (!all.length) return;
   const rows = groupIntoRows(all);
@@ -187,10 +238,16 @@ let lastMoveAt = 0;
 
 export function initTvNav() {
   document.addEventListener('keydown', (e) => {
-    // The player owns arrows/Enter for seek/volume/play — except while its
-    // own audio/subtitle menu is open, when this takes over navigating that
-    // menu's items instead (candidates() scopes to just the menu for this).
-    if (document.querySelector('.player') && !document.querySelector('.player__menu')) return;
+    // On desktop, the player owns arrows/Enter directly for seek/volume/play
+    // — except while its own audio/subtitle menu is open, when this takes
+    // over navigating that menu's items instead (candidates() scopes to
+    // just the menu for this). A TV remote has no other way to reach the
+    // player's own buttons at all (no mouse, no keyboard shortcut letters),
+    // so in tv-mode this stays in control the whole time the player is
+    // open — player.js itself skips the keys this owns there (see the
+    // TV_MODE checks in player.js's own keydown handler), so the two never
+    // fight over the same press.
+    if (!isTvMode() && document.querySelector('.player') && !document.querySelector('.player__menu')) return;
 
     const typing = e.target.matches('input, textarea, select, [contenteditable]');
 
@@ -206,7 +263,12 @@ export function initTvNav() {
       return;
     }
 
-    if (ACTIVATE_KEYS.has(e.key) && !typing && cursor && document.contains(cursor)) {
+    // Checked against the current scope, not just "still in the DOM" — an
+    // overlay opening on top of the page (the player, a modal, ...) leaves
+    // whatever was focused before it underneath, still technically in the
+    // document; without this a stray Select press could reach right through
+    // the overlay and re-activate something the viewer can no longer see.
+    if (ACTIVATE_KEYS.has(e.key) && !typing && cursor && candidates().includes(cursor)) {
       e.preventDefault();
       cursor.click();
     }

@@ -86,12 +86,13 @@ function bindTvBack() {
     if (isSearchOpen()) { closeSearch(); return true; }
     if (isNovaOpen()) { closeNova(); return true; }
     // The metadata-edit modal is a one-off overlay rather than a tracked
-    // singleton like the three above — closing it from here doesn't run
-    // its own cleanup (the Escape listener it added stays until it fires
-    // once more), which is harmless: removing an already-detached node is
-    // a no-op, and so is a second removeEventListener call.
+    // singleton like the three above — it exposes its own close() on the
+    // node (modal.eclipseClose) so backing out here still runs its real
+    // cleanup (removing the Escape listener it added) instead of just
+    // vanishing the element and leaking that listener for the rest of
+    // the session.
     const modal = document.querySelector('.modal');
-    if (modal) { modal.remove(); document.body.classList.remove('is-locked'); return true; }
+    if (modal) { (modal.eclipseClose || (() => { modal.remove(); document.body.classList.remove('is-locked'); }))(); return true; }
     return false;
   };
 }

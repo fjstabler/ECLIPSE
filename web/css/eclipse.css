@@ -883,3 +883,24 @@ textarea.input { height: auto; min-height: 96px; padding: 12px 15px; line-height
    else (the row's own paging arrows, a mouse in Downloader's built-in
    browser) doesn't feel inconsistent with everything else on screen. */
 .tv-mode .row__track { scroll-behavior: auto; }
+
+/* The player, D-pad-navigable. Buttons read a little larger from a couch,
+   and the cursor ring gets a touch more room to stay legible at that
+   distance too — same convention as .card.tv-cursor elsewhere, just with
+   more outline since there's no scale/glow effect on a plain icon button. */
+.tv-mode .pbtn { width: 52px; height: 52px; }
+.tv-mode .pbtn svg { width: 28px; height: 28px; }
+.tv-mode .pbtn--big { width: 68px; height: 68px; }
+.tv-mode .pbtn--big svg { width: 36px; height: 36px; }
+.tv-mode .player__controls { gap: 22px; }
+.tv-mode a.tv-cursor, .tv-mode button.tv-cursor, .tv-mode [tabindex].tv-cursor {
+  outline-width: 3px;
+  outline-offset: 4px;
+}
+/* Volume is normally hardware/CEC-controlled from the actual TV or sound
+   system, not the app — this slider is already invisible-until-hover on
+   desktop (width: 0), which off a remote would otherwise leave a real but
+   unseeable D-pad stop sitting in the middle of the control row. */
+.tv-mode .player__volume input { display: none; }
+.tv-mode .player__menu { min-width: 240px; max-width: 320px; }
+.tv-mode .player__menu-item { padding: 14px 16px; font-size: 15px; }

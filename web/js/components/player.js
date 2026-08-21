@@ -1,5 +1,12 @@
 import { el, icon, clear, formatTime, toast } from '../ui.js';
 import { api } from '../api.js';
+import { focusFirstIn } from '../tvnav.js';
+
+// Set once, synchronously, before this module (or any other) ever runs —
+// see index.html. A real Fire TV remote has no keyboard and no mouse, so in
+// tv-mode the player defers its own arrow-key handling to tvnav.js for
+// button-row navigation instead (see the TV_MODE checks in bindKeys()).
+const TV_MODE = document.documentElement.classList.contains('tv-mode');
 
 /**
  * The playback surface.
@@ -108,7 +115,7 @@ class Player {
   buildUI() {
     const { title, episode, next } = this.ctx;
 
-    this.playBtn = el('button', { class: 'pbtn pbtn--big', type: 'button', onClick: () => this.toggle() }, icon('play'));
+    this.playBtn = el('button', { class: 'pbtn pbtn--big', type: 'button', 'aria-label': 'Play', onClick: () => this.toggle() }, icon('play'));
     this.timeLabel = el('span', { class: 'player__time' }, '0:00 / 0:00');
     this.played = el('div', { class: 'player__played', style: { width: '0%' } });
     this.buffer = el('div', { class: 'player__buffer', style: { width: '0%' } });
@@ -126,8 +133,8 @@ class Player {
       onInput: (e) => { this.video.volume = Number(e.target.value); this.video.muted = Number(e.target.value) === 0; },
     });
 
-    this.muteBtn = el('button', { class: 'pbtn', type: 'button', onClick: () => this.toggleMute() }, icon('volume'));
-    this.fsBtn = el('button', { class: 'pbtn', type: 'button', onClick: () => this.toggleFullscreen() }, icon('fullscreen'));
+    this.muteBtn = el('button', { class: 'pbtn', type: 'button', 'aria-label': 'Mute', onClick: () => this.toggleMute() }, icon('volume'));
+    this.fsBtn = el('button', { class: 'pbtn', type: 'button', 'aria-label': 'Fullscreen', onClick: () => this.toggleFullscreen() }, icon('fullscreen'));
 
     const subs = this.ctx.subtitles || [];
     this.subBtn = subs.length
@@ -204,8 +211,8 @@ class Player {
   bindVideo() {
     const v = this.video;
 
-    v.addEventListener('play', () => { this.playBtn.innerHTML = ''; this.playBtn.append(icon('pause')); });
-    v.addEventListener('pause', () => { this.playBtn.innerHTML = ''; this.playBtn.append(icon('play')); });
+    v.addEventListener('play', () => { this.playBtn.innerHTML = ''; this.playBtn.append(icon('pause')); this.playBtn.setAttribute('aria-label', 'Pause'); });
+    v.addEventListener('pause', () => { this.playBtn.innerHTML = ''; this.playBtn.append(icon('play')); this.playBtn.setAttribute('aria-label', 'Play'); });
     v.addEventListener('timeupdate', () => this.tick());
     v.addEventListener('progress', () => this.updateBuffer());
     v.addEventListener('waiting', () => this.root.classList.add('is-buffering'));
@@ -291,6 +298,7 @@ class Player {
     this.video.muted = !this.video.muted;
     this.muteBtn.innerHTML = '';
     this.muteBtn.append(icon(this.video.muted ? 'muted' : 'volume'));
+    this.muteBtn.setAttribute('aria-label', this.video.muted ? 'Unmute' : 'Mute');
     this.volumeInput.value = this.video.muted ? 0 : this.video.volume;
   }
 
@@ -300,6 +308,7 @@ class Player {
       else await this.root.requestFullscreen();
       this.fsBtn.innerHTML = '';
       this.fsBtn.append(icon(document.fullscreenElement ? 'exitFullscreen' : 'fullscreen'));
+      this.fsBtn.setAttribute('aria-label', document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen');
     } catch {
       toast('Fullscreen was blocked by the browser');
     }
@@ -367,6 +376,10 @@ class Player {
 
     document.body.append(menu);
     this.trackMenu = menu;
+    // On a remote there's no hover/first-arrow-press to reveal where the
+    // cursor is — land it on the current track immediately so the menu
+    // reads as already-focused, not blank until the first D-pad press.
+    if (TV_MODE) focusFirstIn(menu);
 
     // The click that opened this menu is still bubbling; listening for the
     // next one would close it immediately.
@@ -436,10 +449,21 @@ class Player {
         if (!this.video.paused) this.root.classList.add('is-idle');
       }, 3000);
     };
+    // Exposed so bindKeys() can un-hide the OSD on a D-pad press too — a
+    // remote has no mousemove to fall back on, and without this a press
+    // while idle would silently act on controls the viewer can't see.
+    this.resetIdle = reset;
     this.root.addEventListener('mousemove', reset);
     this.root.addEventListener('touchstart', reset, { passive: true });
     this.video.addEventListener('click', () => this.toggle());
     reset();
+  }
+
+  /** Whether a D-pad cursor currently sits on one of the player's own
+   * buttons — once it does, Left/Right hand off to tvnav for moving
+   * between them instead of seeking directly. */
+  controlsActive() {
+    return !!this.ui?.querySelector('.tv-cursor');
   }
 
   bindKeys() {
@@ -449,6 +473,25 @@ class Player {
       // tvnav.js), and its own Escape handler closes just the menu.
       if (this.trackMenu) return;
       if (e.target.matches('input, textarea')) return;
+
+      // Any key press reveals a hidden OSD — a remote has no mousemove to
+      // fall back on, and without this a D-pad press while idle would act
+      // on controls the viewer can't see.
+      this.resetIdle?.();
+
+      // A real Fire TV remote has no keyboard shortcut letters and no
+      // mouse — the only way it can reach the audio/subtitle/fullscreen/
+      // mute/close buttons is by D-pad-navigating tvnav's own cursor onto
+      // them (see tvnav.js's ambient .player__ui scoping). Up/Down always
+      // hand off there in tv-mode; Left/Right only once a control is
+      // already focused — until then they stay a direct seek, exactly
+      // like the desktop keyboard shortcut.
+      const handingOffToTvnav = TV_MODE && (
+        e.key === 'ArrowUp' || e.key === 'ArrowDown' ||
+        ((e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === ' ') && this.controlsActive())
+      );
+      if (handingOffToTvnav) return;
+
       switch (e.key) {
         case ' ': case 'k': e.preventDefault(); this.toggle(); break;
         case 'ArrowLeft': case 'j': e.preventDefault(); this.skip(-10); break;

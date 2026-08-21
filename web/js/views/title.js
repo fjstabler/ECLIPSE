@@ -5,6 +5,9 @@ import { Row } from '../components/row.js';
 import { openPlayer } from '../components/player.js';
 import { openNova } from '../components/nova.js';
 import { navigate } from '../router.js';
+import { focusFirstIn } from '../tvnav.js';
+
+const TV_MODE = document.documentElement.classList.contains('tv-mode');
 
 export async function TitleView({ params, outlet }) {
   const title = await api.title(Number(params.id));
@@ -92,7 +95,7 @@ export async function TitleView({ params, outlet }) {
         state.user?.is_admin
           ? el('button', {
               class: 'btn btn--ghost btn--icon', type: 'button', 'aria-label': 'Edit metadata', title: 'Edit metadata',
-              onClick: () => document.body.append(EditMetadataModal(title)),
+              onClick: () => EditMetadataModal(title),
             }, icon('edit'))
           : null
       )
@@ -348,6 +351,18 @@ function EditMetadataModal(title) {
 
   document.addEventListener('keydown', onKey);
   document.body.classList.add('is-locked');
+  // The Fire TV back-button bridge in app.js can only reach this modal
+  // generically (it has no import of this module) — exposing the real
+  // close() on the node itself lets it run proper cleanup instead of
+  // falling back to a bare .remove() that would leak the keydown listener
+  // above for the rest of the session.
+  modal.eclipseClose = close;
+  document.body.append(modal);
+  // Focusing anything only works once the node is actually connected to
+  // the document — appending has to happen first, or this silently no-ops
+  // on a detached tree and the cursor is left sitting on whatever opened
+  // the modal instead.
+  if (TV_MODE) focusFirstIn(modal);
   runSearch();
 
   return modal;
