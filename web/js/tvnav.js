@@ -180,20 +180,24 @@ function setCursor(el) {
   }
 
   // Moving to a different row glides the whole page there — see
-  // animateScrollTo. getBoundingClientRect() is a no-op on a
-  // position:fixed element like the nav — it's always technically "in
-  // view" regardless of page scroll — so reaching it needs an explicit
-  // target instead of the usual "only scroll if not already visible".
-  if (cursor.closest('.nav')) {
+  // animateScrollTo. The nav and hero are always the very top of the
+  // page, so reaching either just means "show the top" (getBoundingClientRect
+  // is a no-op on the nav specifically — position:fixed reports as always
+  // "in view" regardless of scroll, so it needs an explicit target
+  // anyway). Everything else re-centers its *row* — title included, not
+  // just the card — in the middle of the screen every time, the same
+  // "current selection always sits in the same comfortable spot" feel a
+  // real TV app has, rather than merely nudging it just barely past the
+  // nearest edge, which could leave it (and the hero's own title/synopsis
+  // above the buttons, reached the same way) sitting flush against the
+  // top or bottom of the screen instead of clearly on display.
+  if (cursor.closest('.nav') || cursor.closest('.hero')) {
     animateScrollTo(0);
   } else {
-    const rect = cursor.getBoundingClientRect();
-    const margin = 24;
-    if (rect.top < margin) {
-      animateScrollTo(window.scrollY + rect.top - margin);
-    } else if (rect.bottom > window.innerHeight - margin) {
-      animateScrollTo(window.scrollY + rect.bottom - window.innerHeight + margin);
-    }
+    const container = cursor.closest('.row') || cursor;
+    const rect = container.getBoundingClientRect();
+    const center = rect.top + rect.height / 2;
+    animateScrollTo(window.scrollY + center - window.innerHeight / 2);
   }
 }
 

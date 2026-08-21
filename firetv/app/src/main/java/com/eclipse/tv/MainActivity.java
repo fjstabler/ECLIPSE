@@ -128,6 +128,13 @@ public class MainActivity extends Activity {
         // — see index.html's inline detector script.
         settings.setUserAgentString(settings.getUserAgentString() + " ECLIPSE-TV/1.0");
         webView.setBackgroundColor(0xFF08080C);
+        // This is Android's own scrollbar chrome, layered on top of the page —
+        // no CSS on the page side can touch it, which is why hiding it there
+        // wasn't enough. The web client already glides the page itself; a
+        // native scrollbar overlay on top of that just reads as "this is a
+        // scrolled webview," the opposite of the effect the glide is for.
+        webView.setVerticalScrollBarEnabled(false);
+        webView.setHorizontalScrollBarEnabled(false);
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
