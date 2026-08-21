@@ -1,5 +1,7 @@
 /** Hash router. No build step, no history-API server config to get wrong. */
 
+import { cancelScrollAnimation } from './tvnav.js';
+
 const routes = [];
 let outlet = null;
 let currentCleanup = null;
@@ -65,6 +67,9 @@ export async function render() {
       console.error('[route]', err);
       outlet.replaceChildren(errorView(err));
     }
+    // A row-to-row glide left running from the outgoing page would otherwise
+    // fight this for a frame or two, since it keeps calling scrollTo itself.
+    cancelScrollAnimation();
     window.scrollTo({ top: 0, behavior: 'instant' });
     return;
   }

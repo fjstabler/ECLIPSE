@@ -2,7 +2,6 @@ import { el, icon, formatRuntime } from '../ui.js';
 import { api } from '../api.js';
 import { Row } from '../components/row.js';
 import { openPlayer } from '../components/player.js';
-import { openNova } from '../components/nova.js';
 import { navigate } from '../router.js';
 
 export async function HomeView({ outlet }) {
@@ -62,23 +61,15 @@ function Hero(title) {
           onClick: () => navigate(`/title/${title.id}`),
         }, icon('info'), 'More info')
       ),
+      // Plain caption, not a button — the N.O.V.A. button in the nav already
+      // does this, so a second D-pad stop here (previously its own row,
+      // bold and highlightable) was redundant and, for anyone scrolling
+      // past the hero, an extra press just to get back up to it.
       el(
         'div',
         { class: 'hero__nova' },
         el('span', { class: 'nova-orb' }),
-        el(
-          'div',
-          {},
-          el('span', {}, 'Not feeling this one? '),
-          el('button', {
-            type: 'button',
-            style: {
-              background: 'none', border: 0, color: '#fff', cursor: 'pointer',
-              textDecoration: 'underline', padding: 0, font: 'inherit', fontWeight: '600',
-            },
-            onClick: () => openNova('What should I watch tonight?'),
-          }, 'Ask N.O.V.A. for something else')
-        )
+        el('span', {}, 'Not feeling this one? Ask N.O.V.A. for something else.')
       )
     )
   );

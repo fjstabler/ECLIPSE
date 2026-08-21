@@ -160,14 +160,79 @@ function setCursor(el) {
   // here depends on it succeeding. Activation goes through `cursor` instead.
   try { cursor.focus({ preventScroll: true }); } catch { /* not focusable is fine, it's still clickable */ }
 
-  // scrollIntoView is a no-op on a position:fixed element — it's always
-  // technically "in view" regardless of page scroll — so reaching the nav
-  // needs an explicit scroll back to the top instead.
-  if (cursor.closest('.nav')) {
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-  } else {
-    cursor.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+  // Sideways movement within a shelf stays instant. A direct .scrollLeft
+  // assignment looks like it should bypass .row__track's CSS
+  // scroll-behavior:smooth (that's for mouse users paging with the shelf
+  // arrows) — but modern Chromium runs the property setter through the
+  // same "scroll a coordinate into view" steps as scrollTo(), smooth
+  // behavior included, so it animates too. An explicit behavior:'instant'
+  // on scrollTo() is what actually overrides the CSS either way.
+  const track = cursor.closest('.row__track');
+  if (track) {
+    const trackRect = track.getBoundingClientRect();
+    const elRect = cursor.getBoundingClientRect();
+    const edge = 8; // a little breathing room past the row's own edge fade
+    if (elRect.left < trackRect.left + edge) {
+      track.scrollTo({ left: track.scrollLeft - (trackRect.left + edge - elRect.left), behavior: 'instant' });
+    } else if (elRect.right > trackRect.right - edge) {
+      track.scrollTo({ left: track.scrollLeft + (elRect.right - (trackRect.right - edge)), behavior: 'instant' });
+    }
   }
+
+  // Moving to a different row glides the whole page there — see
+  // animateScrollTo. getBoundingClientRect() is a no-op on a
+  // position:fixed element like the nav — it's always technically "in
+  // view" regardless of page scroll — so reaching it needs an explicit
+  // target instead of the usual "only scroll if not already visible".
+  if (cursor.closest('.nav')) {
+    animateScrollTo(0);
+  } else {
+    const rect = cursor.getBoundingClientRect();
+    const margin = 24;
+    if (rect.top < margin) {
+      animateScrollTo(window.scrollY + rect.top - margin);
+    } else if (rect.bottom > window.innerHeight - margin) {
+      animateScrollTo(window.scrollY + rect.bottom - window.innerHeight + margin);
+    }
+  }
+}
+
+let scrollAnimTarget = null;
+let scrollAnimRaf = null;
+
+/**
+ * A hand-rolled smooth scroll, not scrollTo({behavior:'smooth'}) — the
+ * native version doesn't retarget cleanly when called again before the
+ * previous call finishes (each one restarts its own deceleration curve
+ * instead of continuing toward the new endpoint), which is exactly what a
+ * remote's key-repeat does. Driving it frame-by-frame here means a rapid
+ * run of presses just keeps easing toward whatever the latest target is,
+ * the way Netflix's row transitions stay coherent under fast input instead
+ * of stuttering — one continuous glide, not restarted per keypress.
+ */
+function animateScrollTo(target) {
+  const max = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+  scrollAnimTarget = Math.max(0, Math.min(target, max));
+  if (scrollAnimRaf) return; // already running; the loop below picks up the new target itself
+  const step = () => {
+    const current = window.scrollY;
+    const diff = scrollAnimTarget - current;
+    if (Math.abs(diff) < 0.5) {
+      window.scrollTo(0, scrollAnimTarget);
+      scrollAnimRaf = null;
+      return;
+    }
+    window.scrollTo(0, current + diff * 0.25);
+    scrollAnimRaf = requestAnimationFrame(step);
+  };
+  scrollAnimRaf = requestAnimationFrame(step);
+}
+
+/** Called on route changes, which do their own instant jump to the top —
+ * otherwise a glide still in flight from the outgoing page would fight it
+ * for a frame or two. */
+export function cancelScrollAnimation() {
+  if (scrollAnimRaf) { cancelAnimationFrame(scrollAnimRaf); scrollAnimRaf = null; }
 }
 
 function moveFocus(key) {
