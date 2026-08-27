@@ -917,6 +917,17 @@ textarea.input { height: auto; min-height: 96px; padding: 12px 15px; line-height
 .tv-mode .hero__overview { -webkit-line-clamp: 2; margin-bottom: 16px; }
 .tv-mode .hero__nova { margin-top: 12px; }
 
+/* The card focus ring is a box-shadow, and box-shadow is one of the few
+   things a transition can't hand off to the compositor — every one of the
+   ~9 frames between the old card losing it and the new one gaining it gets
+   repainted, not just recomposited. On desktop that's invisible; fired on
+   every single D-pad hop on a Fire TV Stick's much weaker GPU, it's a real,
+   repeated cost stacked right on top of the page glide already running at
+   the same moment. tvnav.js's whole design is "movement is instant" — this
+   just makes the ring keep that promise too: it snaps with the cursor
+   instead of chasing it. */
+.tv-mode .card__art { transition: none; }
+
 /* Every backdrop-filter in the app, replaced with an equivalent solid fill. */
 .tv-mode .nav.is-stuck { backdrop-filter: none; background: rgba(8, 8, 12, 0.97); }
 .tv-mode .btn--ghost { backdrop-filter: none; background: rgba(255, 255, 255, 0.16); }

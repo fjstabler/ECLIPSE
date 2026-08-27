@@ -182,15 +182,32 @@ async function send() {
   scrollToEnd();
 
   let buffer = '';
+  // A reply streams in dozens of small chunks a second. Re-parsing the
+  // whole buffer as markdown and rebuilding the bubble's DOM on every
+  // single one of them — plus forcing a layout via scrollHeight each
+  // time — is cheap enough to hide on a desktop CPU but adds up to real,
+  // visible stutter on a Fire TV Stick's much weaker one, especially
+  // once the reply gets long (each pass re-parses the whole thing, so
+  // the total cost grows with the square of the reply length). Coalescing
+  // into one paint per animation frame keeps what's on screen just as
+  // current — nothing streams faster than the display can show it anyway
+  // — while cutting the actual work to a fraction of the per-token rate.
+  let renderRaf = null;
+  const render = () => {
+    renderRaf = null;
+    bubble.innerHTML = miniMarkdown(buffer);
+    scrollToEnd();
+  };
+  const scheduleRender = () => { if (!renderRaf) renderRaf = requestAnimationFrame(render); };
+  const cancelRender = () => { if (renderRaf) { cancelAnimationFrame(renderRaf); renderRaf = null; } };
 
   try {
     await novaChat(text, (event) => {
       switch (event.type) {
         case 'text':
           buffer += event.text;
-          bubble.innerHTML = miniMarkdown(buffer);
           toolLine.remove();
-          scrollToEnd();
+          scheduleRender();
           break;
         case 'tool':
           toolLine.textContent = event.label || 'Working…';
@@ -203,22 +220,27 @@ async function send() {
           }
           break;
         case 'error':
+          cancelRender();
           toolLine.remove();
           bubble.innerHTML = miniMarkdown(event.message);
           bubble.style.borderColor = 'rgba(255,90,104,0.35)';
           break;
         case 'done':
+          cancelRender();
           toolLine.remove();
-          if (!buffer && event.content) bubble.innerHTML = miniMarkdown(event.content);
+          bubble.innerHTML = miniMarkdown(buffer || event.content || '');
+          scrollToEnd();
           break;
         default:
           break;
       }
     });
   } catch (err) {
+    cancelRender();
     toolLine.remove();
     bubble.textContent = `N.O.V.A. could not reply: ${err.message}`;
   } finally {
+    cancelRender();
     toolLine.remove();
     busy = false;
     sendBtn.disabled = !inputNode.value.trim();
