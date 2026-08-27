@@ -20,12 +20,14 @@ export function getTitle(id) {
 export function decorate(row) {
   if (!row) return null;
   const tags = db
-    .prepare('SELECT tag_type, tag_value, weight FROM title_tags WHERE title_id = ? ORDER BY ordering')
+    .prepare('SELECT tag_type, tag_value, weight, image FROM title_tags WHERE title_id = ? ORDER BY ordering')
     .all(row.id);
 
   const grouped = {};
+  const castPhotos = [];
   for (const t of tags) {
     (grouped[t.tag_type] ||= []).push(t.tag_value);
+    if (t.tag_type === 'cast') castPhotos.push({ name: t.tag_value, photo: t.image || null });
   }
 
   return {
@@ -33,6 +35,7 @@ export function decorate(row) {
     genres: grouped.genre || [],
     keywords: grouped.keyword || [],
     cast: grouped.cast || [],
+    castPhotos,
     directors: grouped.director || [],
     creators: grouped.creator || [],
     writers: grouped.writer || [],

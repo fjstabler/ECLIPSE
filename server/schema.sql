@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS title_tags (
   tag_value TEXT NOT NULL,
   weight    REAL NOT NULL DEFAULT 1.0,
   ordering  INTEGER NOT NULL DEFAULT 0,
+  image     TEXT,                   -- cached headshot path, cast rows only
   PRIMARY KEY (title_id, tag_type, tag_value)
 );
 

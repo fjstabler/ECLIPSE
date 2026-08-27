@@ -13,6 +13,17 @@ const execFileAsync = promisify(execFile);
 
 let scanning = false;
 let lastProgress = { state: 'idle', found: 0, processed: 0, added: 0, updated: 0, removed: 0, current: null };
+// Set for the duration of a scan that's populating a previously-empty
+// library. Everything found in that first pass is the household's existing
+// collection, not something newly added to it — flagging all of it "NEW"
+// for a week would just be noise the day the server comes online.
+let backdateNewTitles = false;
+
+/** Matches SQLite's own `datetime('now')` format so isNew()'s parsing keeps working. */
+function addedAtValue() {
+  const ms = backdateNewTitles ? Date.now() - 8 * 86400_000 : Date.now();
+  return new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+}
 
 export function scanStatus() {
   return { ...lastProgress, scanning };
@@ -180,23 +191,29 @@ function upsertTitle({ kind, title, year, meta, existingTitleId }) {
 
   const info = db.prepare(`
     INSERT INTO titles (kind, title, sort_title, original_title, year, overview, tagline, runtime, rating,
-      certification, status, poster, backdrop, logo, trailer_url, tmdb_id, imdb_id, metadata_state)
+      certification, status, poster, backdrop, logo, trailer_url, tmdb_id, imdb_id, metadata_state, added_at)
     VALUES (@kind, @title, @sort_title, @original_title, @year, @overview, @tagline, @runtime, @rating,
-      @certification, @status, @poster, @backdrop, @logo, @trailer_url, @tmdb_id, @imdb_id, @metadata_state)
-  `).run(fields);
+      @certification, @status, @poster, @backdrop, @logo, @trailer_url, @tmdb_id, @imdb_id, @metadata_state, @added_at)
+  `).run({ ...fields, added_at: addedAtValue() });
   return { id: info.lastInsertRowid, manual: false };
 }
 
-function replaceTags(titleId, tags) {
+async function replaceTags(titleId, tags) {
   if (!tags?.length) return;
+  // Cast headshots are the only tag rows with an image — cache each one
+  // locally (like poster/backdrop) so cast strips don't hotlink TMDB and
+  // still work if the API key is later removed.
+  const withImages = await Promise.all(
+    tags.map(async (t) => (t.image ? { ...t, image: await cacheImage(t.image) } : t))
+  );
   db.prepare('DELETE FROM title_tags WHERE title_id = ?').run(titleId);
   const insert = db.prepare(
-    'INSERT OR REPLACE INTO title_tags (title_id, tag_type, tag_value, weight, ordering) VALUES (?, ?, ?, ?, ?)'
+    'INSERT OR REPLACE INTO title_tags (title_id, tag_type, tag_value, weight, ordering, image) VALUES (?, ?, ?, ?, ?, ?)'
   );
   const run = db.transaction((rows) => {
-    for (const t of rows) insert.run(titleId, t.type, t.value, t.weight, t.ordering);
+    for (const t of rows) insert.run(titleId, t.type, t.value, t.weight, t.ordering, t.image || null);
   });
-  run(tags);
+  run(withImages);
 }
 
 async function cacheTitleArtwork(meta) {
@@ -278,7 +295,7 @@ async function ingestMovie(filePath, stat) {
   const meta = await lookupMovie(parsed.title, parsed.year);
   const existingTitleId = getFileByPath.get(filePath)?.title_id || null;
   const { id: titleId, manual } = upsertTitle({ kind: 'movie', title: parsed.title, year: parsed.year, meta, existingTitleId });
-  if (meta?.tags && !manual) replaceTags(titleId, meta.tags);
+  if (meta?.tags && !manual) await replaceTags(titleId, meta.tags);
   await attachFile({ filePath, stat, titleId, episodeId: null });
   return titleId;
 }
@@ -290,7 +307,7 @@ async function ingestEpisode(filePath, stat, libraryRoot) {
   const meta = await lookupSeries(parsed.series, parsed.seriesYear);
   const existingTitleId = getFileByPath.get(filePath)?.title_id || null;
   const { id: titleId, manual } = upsertTitle({ kind: 'series', title: parsed.series, year: parsed.seriesYear, meta, existingTitleId });
-  if (meta?.tags && !manual) replaceTags(titleId, meta.tags);
+  if (meta?.tags && !manual) await replaceTags(titleId, meta.tags);
 
   // Season row
   let seasonMeta = null;
@@ -416,6 +433,7 @@ async function attachFile({ filePath, stat, titleId, episodeId }) {
 export async function runScan({ full = false } = {}) {
   if (scanning) return { skipped: true, reason: 'A scan is already running' };
   scanning = true;
+  backdateNewTitles = db.prepare('SELECT COUNT(*) AS n FROM titles').get().n === 0;
 
   const logId = db.prepare('INSERT INTO scan_log DEFAULT VALUES').run().lastInsertRowid;
   const errors = [];
@@ -514,6 +532,7 @@ export async function runScan({ full = false } = {}) {
     return { added, updated, removed, errors };
   } finally {
     scanning = false;
+    backdateNewTitles = false;
     movieMetaCache.clear();
     seriesMetaCache.clear();
     seasonCache.clear();

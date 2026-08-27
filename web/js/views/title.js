@@ -116,13 +116,17 @@ export async function TitleView({ params, outlet }) {
   }
 
   if (title.cast?.length) {
+    const people = title.castPhotos?.length
+      ? title.castPhotos.slice(0, 12)
+      : title.cast.slice(0, 12).map((name) => ({ name, photo: null }));
     left.append(
       el('div', { class: 'detail__section' },
         el('p', { class: 'detail__label' }, 'CAST'),
         el('div', { class: 'people' },
-          title.cast.slice(0, 12).map((name) =>
+          people.map(({ name, photo }) =>
             el('div', { class: 'person' },
-              el('div', { class: 'person__face' }, initials(name)),
+              el('div', { class: 'person__face' },
+                photo ? el('img', { src: photo, alt: '', loading: 'lazy' }) : initials(name)),
               el('p', { class: 'person__name' }, name)))))
     );
   }
@@ -134,17 +138,22 @@ export async function TitleView({ params, outlet }) {
   if (title.genres?.length) facts.push(['GENRES', title.genres.join(', ')]);
   if (title.studios?.length) facts.push(['STUDIO', title.studios.slice(0, 2).join(', ')]);
   if (title.status) facts.push(['STATUS', title.status]);
+
+  // File tech specs (codec/quality) are a footnote for the curious, not a
+  // content credit — kept visually much quieter than director/genre/etc so
+  // it doesn't compete with them for attention.
+  let tech = null;
   if (title.files?.[0]) {
     const f = title.files[0];
-    const tech = [f.quality, f.videoCodec?.toUpperCase(), f.audioCodec?.toUpperCase()].filter(Boolean).join(' · ');
-    if (tech) facts.push(['FILE', tech]);
+    tech = [f.quality, f.videoCodec?.toUpperCase(), f.audioCodec?.toUpperCase()].filter(Boolean).join(' · ') || null;
   }
 
   const right = el('aside', {},
     el('div', { class: 'factlist' },
       facts.map(([k, v]) => el('div', { class: 'fact' },
         el('div', { class: 'fact__k' }, k),
-        el('div', { class: 'fact__v' }, v)))));
+        el('div', { class: 'fact__v' }, v)))),
+    tech ? el('p', { class: 'fact__tech' }, tech) : null);
 
   const page = el('div', { class: 'page' },
     hero,

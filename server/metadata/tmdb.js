@@ -280,7 +280,10 @@ function collectTags(data, kind) {
   const cast = data.credits?.cast || [];
   for (const [i, c] of cast.slice(0, 12).entries()) {
     // Top billing carries more signal than the twelfth name on the call sheet.
-    tags.push({ type: 'cast', value: c.name, weight: Math.max(0.3, 1 - i * 0.06), ordering: i });
+    tags.push({
+      type: 'cast', value: c.name, weight: Math.max(0.3, 1 - i * 0.06), ordering: i,
+      image: imageUrl(c.profile_path, 'w185'),
+    });
   }
 
   const crew = data.credits?.crew || [];
