@@ -36,7 +36,8 @@ step, no bundler, no framework. Change a colour in the CSS and refresh.
 
 ## Getting started
 
-You need [Node.js](https://nodejs.org) 20 or newer. Then, in a terminal:
+You need [Node.js](https://nodejs.org) 22 or newer — the `openai` package
+N.O.V.A.'s conversation runs on requires it. Then, in a terminal:
 
 ```bash
 git clone https://github.com/fjstabler/ECLIPSE.git
@@ -65,6 +66,28 @@ npm run demo -- --clear   # removes them again
 
 Demo titles are for judging the interface — the files are placeholders and
 won't play.
+
+---
+
+## Running it constantly
+
+`npm start` is fine for trying ECLIPSE out, but for a home server you want it
+running permanently — back up after a reboot, restarted if it crashes,
+updatable without re-doing setup. A `Dockerfile` and `docker-compose.yml`
+are included for exactly that:
+
+```bash
+cp .env.example .env   # fill in your library paths and API keys first
+docker compose up -d --build
+```
+
+Update to the latest commit any time with `git pull && docker compose up -d
+--build` — your library, history and profiles live in the bind-mounted
+`data/` folder, not the image, so rebuilding never loses them.
+
+Putting this on a Proxmox host specifically — creating the LXC container,
+installing Docker inside it, keeping it started on boot — is walked through
+step by step in [`docs/proxmox-deploy.md`](docs/proxmox-deploy.md).
 
 ---
 

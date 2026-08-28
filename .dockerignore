@@ -1,0 +1,12 @@
+node_modules
+data
+.env
+.env.local
+.git
+.github
+.claude
+firetv
+*.log
+*.db
+*.db-wal
+*.db-shm

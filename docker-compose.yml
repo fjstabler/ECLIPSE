@@ -1,0 +1,30 @@
+services:
+  eclipse:
+    build: .
+    container_name: eclipse
+    # Restarts on crash and comes back up automatically after the host
+    # reboots, as long as the Docker daemon itself starts on boot (it does
+    # by default once enabled — see docs/proxmox-deploy.md).
+    restart: unless-stopped
+    ports:
+      - "8383:8383"
+    # The same .env `npm run setup` creates for a bare-metal run — TMDB/OpenAI
+    # keys, ECLIPSE_WATCH, etc. all pass straight through. The two library
+    # paths inside it are read below (compose loads .env itself for the
+    # ${...} substitutions), then overridden to fixed in-container paths
+    # right after, since a host path and a container path are never the same
+    # thing once a bind mount is involved.
+    env_file:
+      - .env
+    environment:
+      ECLIPSE_DATA_DIR: /app/data
+      ECLIPSE_MOVIES_DIR: /media/movies
+      ECLIPSE_SERIES_DIR: /media/series
+    volumes:
+      - ./data:/app/data
+      # One folder per library — if ECLIPSE_MOVIES_DIR or _SERIES_DIR in your
+      # .env lists more than one path separated by `:`, only the first is
+      # usable here; add another `- /host/path:/media/movies2:ro` line (and
+      # the matching entry in ECLIPSE_MOVIES_DIR above) for each extra one.
+      - ${ECLIPSE_MOVIES_DIR}:/media/movies:ro
+      - ${ECLIPSE_SERIES_DIR}:/media/series:ro
