@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 import { config } from '../config.js';
 import { requireAuth } from '../auth.js';
+import { requirePermittedFile } from '../parental.js';
 import { getMediaFile, playbackContext, getTitle } from '../library.js';
 import { db } from '../db.js';
 import { log } from '../log.js';
@@ -31,7 +32,7 @@ const MIME_TYPES = {
 };
 
 /** Playback metadata: what to play, what can be switched, and what follows. */
-router.get('/context/:fileId', requireAuth, (req, res) => {
+router.get('/context/:fileId', requireAuth, requirePermittedFile, (req, res) => {
   const ctx = playbackContext(Number(req.params.fileId), req.user.id);
   if (!ctx) return res.status(404).json({ error: 'That file is not in the library' });
   res.json(ctx);
@@ -42,7 +43,7 @@ router.get('/context/:fileId', requireAuth, (req, res) => {
  * trying. The player asks first so it can pick the right URL, and so the
  * technical panel can explain why something is being converted.
  */
-router.get('/decide/:fileId', requireAuth, async (req, res) => {
+router.get('/decide/:fileId', requireAuth, requirePermittedFile, async (req, res) => {
   const file = getMediaFile(Number(req.params.fileId));
   if (!file) return res.status(404).json({ error: 'That file is not in the library' });
 
@@ -65,7 +66,7 @@ router.get('/decide/:fileId', requireAuth, async (req, res) => {
  * window rather than the whole file, so scrubbing doesn't re-download an
  * eight-gigabyte remux from the start.
  */
-router.get('/direct/:fileId', requireAuth, (req, res) => {
+router.get('/direct/:fileId', requireAuth, requirePermittedFile, (req, res) => {
   const file = getMediaFile(Number(req.params.fileId));
   if (!file) return res.status(404).json({ error: 'That file is not in the library' });
   if (!fs.existsSync(file.path)) {
@@ -132,7 +133,7 @@ router.get('/direct/:fileId', requireAuth, (req, res) => {
  * ?t=<seconds> and sets currentTime to match — because a fragmented mp4 on a
  * pipe has no length for the browser to byte-seek into.
  */
-router.get('/transcode/:fileId', requireAuth, async (req, res) => {
+router.get('/transcode/:fileId', requireAuth, requirePermittedFile, async (req, res) => {
   if (!config.ffmpeg.enabled) {
     return res.status(503).json({ error: 'Transcoding is switched off on this server' });
   }
@@ -240,7 +241,7 @@ router.get('/transcode/:fileId', requireAuth, async (req, res) => {
  * A subtitle track as WebVTT — embedded or sidecar, the player doesn't care
  * which. Track ids come straight from the playback context.
  */
-router.get('/subtitles/:fileId/:trackId', requireAuth, async (req, res) => {
+router.get('/subtitles/:fileId/:trackId', requireAuth, requirePermittedFile, async (req, res) => {
   const file = getMediaFile(Number(req.params.fileId));
   if (!file) return res.status(404).json({ error: 'That file is not in the library' });
 

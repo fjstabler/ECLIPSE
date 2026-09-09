@@ -1298,3 +1298,7 @@ textarea.input { height: auto; min-height: 96px; padding: 12px 15px; line-height
 }
 .search-episode__name { font-size: 13.5px; font-weight: 600; }
 .search-episode__meta { font-size: 11.5px; color: var(--text-faint); margin-top: 3px; }
+.profilepick__hint {
+  font-size: 10px; letter-spacing: 0.08em; color: var(--text-faint);
+  border: 1px solid var(--hairline); border-radius: 4px; padding: 1px 5px; margin-top: 4px;
+}

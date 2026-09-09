@@ -50,14 +50,51 @@ export async function createUser({ username, displayName, password, isAdmin = fa
 
 export function getUserById(id) {
   return db
-    .prepare('SELECT id, username, display_name, avatar_color, is_admin, is_kids, created_at FROM users WHERE id = ?')
+    // max_rating has to travel with the user on every request: it is what
+    // every parental check reads, and a missing column there means the limit
+    // silently allows everything rather than failing loudly.
+    .prepare(`
+      SELECT id, username, display_name, avatar_color, is_admin, is_kids, max_rating,
+             pin_hash IS NOT NULL AS has_pin, created_at
+      FROM users WHERE id = ?
+    `)
     .get(id);
 }
 
 export function listUsers() {
   return db
-    .prepare('SELECT id, username, display_name, avatar_color, is_admin, is_kids FROM users ORDER BY id')
+    .prepare(`
+      SELECT id, username, display_name, avatar_color, is_admin, is_kids, max_rating,
+             pin_hash IS NOT NULL AS has_pin
+      FROM users ORDER BY id
+    `)
     .all();
+}
+
+/**
+ * A PIN is the same credential mechanism as a password, stored separately and
+ * kept short on purpose: typing a real password on a Fire TV remote, one
+ * letter at a time on an on-screen keyboard, is miserable enough that people
+ * pick bad passwords to avoid it. Four digits on a TV, the password
+ * everywhere else.
+ */
+export async function setPin(userId, pin) {
+  const value = String(pin || '').trim();
+  if (!value) {
+    db.prepare('UPDATE users SET pin_hash = NULL, pin_salt = NULL WHERE id = ?').run(userId);
+    return { hasPin: false };
+  }
+  if (!/^\d{4,8}$/.test(value)) throw new Error('A PIN is 4 to 8 digits');
+  const { hash, salt } = await hashPassword(value);
+  db.prepare('UPDATE users SET pin_hash = ?, pin_salt = ? WHERE id = ?').run(hash, salt, userId);
+  return { hasPin: true };
+}
+
+export async function authenticateWithPin(username, pin) {
+  const row = db.prepare('SELECT * FROM users WHERE username = ?').get(String(username || '').toLowerCase());
+  if (!row || !row.pin_hash) return null;
+  const ok = await verifyPassword(String(pin || ''), row.pin_hash, row.pin_salt);
+  return ok ? getUserById(row.id) : null;
 }
 
 export async function authenticate(username, password) {

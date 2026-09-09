@@ -1,6 +1,7 @@
 import chokidar from 'chokidar';
 import path from 'node:path';
 import { config, VIDEO_EXTENSIONS } from '../config.js';
+import { scanTargets } from '../libraries.js';
 import { ingestPath, removePath } from './scanner.js';
 
 let watcher = null;

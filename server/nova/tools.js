@@ -2,6 +2,7 @@ import { db } from '../db.js';
 import { config } from '../config.js';
 import * as library from '../library.js';
 import { recommend, similarTo, tasteSummary, saveTasteProfile, getTasteProfile } from './engine.js';
+import { isAllowed } from '../parental.js';
 
 /**
  * The tools N.O.V.A. can call. Every one of them reads or writes the same data the
@@ -139,7 +140,14 @@ function clamp(n, min, max, fallback) {
  * UI should render as cards alongside N.O.V.A.'s reply.
  */
 export function runTool(name, input, ctx) {
-  const { userId } = ctx;
+  const { userId, maxRating = null } = ctx;
+
+  // N.O.V.A. reads the library through the same eyes as the profile she is
+  // talking to. Filtering her tool results rather than her prose is the only
+  // version of this that works: a model asked to keep a secret will still
+  // mention it, and she cannot recommend what she was never shown.
+  const permitted = (items) => items.filter((t) => isAllowed(t.certification, maxRating));
+  const outOfReach = (title) => title && !isAllowed(title.certification, maxRating);
 
   switch (name) {
     case 'search_library': {
@@ -155,6 +163,7 @@ export function runTool(name, input, ctx) {
       if (input.yearTo) results = results.filter((t) => t.year && t.year <= input.yearTo);
       if (input.maxRuntime) results = results.filter((t) => !t.runtime || t.runtime <= input.maxRuntime);
 
+      results = permitted(results);
       const sliced = results.slice(0, limit);
       return {
         result: {
@@ -168,11 +177,11 @@ export function runTool(name, input, ctx) {
 
     case 'get_recommendations': {
       const limit = clamp(input.limit, 1, 30, 10);
-      const picks = recommend(userId, {
+      const picks = permitted(recommend(userId, {
         limit,
         kind: input.kind || null,
         excludeSeen: !input.includeWatched,
-      });
+      }));
       return {
         result: {
           count: picks.length,
@@ -185,9 +194,11 @@ export function runTool(name, input, ctx) {
 
     case 'get_similar_titles': {
       const seed = library.getTitle(input.titleId);
-      if (!seed) return { result: { error: `No title with id ${input.titleId} on this server.` }, refs: [] };
+      if (!seed || outOfReach(seed)) {
+        return { result: { error: `No title with id ${input.titleId} on this server.` }, refs: [] };
+      }
       const limit = clamp(input.limit, 1, 20, 8);
-      const items = similarTo(input.titleId, { limit });
+      const items = permitted(similarTo(input.titleId, { limit }));
       return {
         result: { seed: { id: seed.id, title: seed.title }, similar: items.map(compact) },
         refs: items.map((t) => t.id),
@@ -196,8 +207,8 @@ export function runTool(name, input, ctx) {
 
     case 'get_viewer_context': {
       const summary = tasteSummary(userId);
-      const history = library.watchHistory(userId, 15);
-      const watchlist = library.getWatchlist(userId, 10);
+      const history = permitted(library.watchHistory(userId, 15));
+      const watchlist = permitted(library.getWatchlist(userId, 10));
       const stats = library.libraryStats();
       return {
         result: {
@@ -221,7 +232,9 @@ export function runTool(name, input, ctx) {
 
     case 'get_title_details': {
       const detail = library.getTitleDetail(input.titleId, userId);
-      if (!detail) return { result: { error: `No title with id ${input.titleId} on this server.` }, refs: [] };
+      if (!detail || outOfReach(detail)) {
+        return { result: { error: `No title with id ${input.titleId} on this server.` }, refs: [] };
+      }
       return {
         result: {
           ...compact(detail),
@@ -257,7 +270,9 @@ export function runTool(name, input, ctx) {
 
     case 'add_to_watchlist': {
       const t = library.getTitle(input.titleId);
-      if (!t) return { result: { error: `No title with id ${input.titleId} on this server.` }, refs: [] };
+      if (!t || outOfReach(t)) {
+        return { result: { error: `No title with id ${input.titleId} on this server.` }, refs: [] };
+      }
       db.prepare('INSERT OR IGNORE INTO watchlist (user_id, title_id) VALUES (?, ?)').run(userId, input.titleId);
       return { result: { added: true, title: t.title }, refs: [t.id] };
     }

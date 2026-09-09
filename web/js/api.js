@@ -76,6 +76,7 @@ export const api = {
   preferences: () => request('GET', '/api/auth/preferences'),
   savePreferences: (body) => request('PUT', '/api/auth/preferences', body),
   registerDevice: (name) => request('POST', '/api/auth/device', { deviceKey: DEVICE_KEY, name }),
+  setPin: (pin) => request('PUT', '/api/auth/pin', { pin }),
 
   // playback
   playbackContext: (fileId) => request('GET', `/api/stream/context/${fileId}`),
@@ -118,6 +119,7 @@ export const api = {
   adminEditTitle: (id, body) => request('PATCH', `/api/admin/titles/${id}`, body),
   adminUsers: () => request('GET', '/api/admin/users'),
   adminDeleteUser: (id) => request('DELETE', `/api/admin/users/${id}`),
+  adminUpdateUser: (id, body) => request('PATCH', `/api/admin/users/${id}`, body),
   adminLibraries: () => request('GET', '/api/admin/libraries'),
   adminAddLibrary: (body) => request('POST', '/api/admin/libraries', body),
   adminUpdateLibrary: (id, body) => request('PATCH', `/api/admin/libraries/${id}`, body),

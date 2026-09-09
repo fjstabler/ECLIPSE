@@ -14,6 +14,7 @@ import { activeSessions, listDevices, endSession, transcodeCount } from '../medi
 import { detectHardware } from '../media/transcode.js';
 import { recentLogs, logCounts, log } from '../log.js';
 import { serverHealth } from '../health.js';
+import { RATING_LADDER } from '../parental.js';
 
 export const router = express.Router();
 router.use(requireAdmin);
@@ -245,9 +246,25 @@ router.patch('/titles/:id', async (req, res) => {
 
 router.get('/users', (req, res) => {
   const users = db
-    .prepare('SELECT id, username, display_name, avatar_color, is_admin, is_kids, created_at FROM users ORDER BY id')
+    .prepare('SELECT id, username, display_name, avatar_color, is_admin, is_kids, max_rating, pin_hash IS NOT NULL AS has_pin, created_at FROM users ORDER BY id')
     .all();
   res.json({ users });
+});
+
+/** Age limit and kids flag for a profile. */
+router.patch('/users/:id', (req, res) => {
+  const id = Number(req.params.id);
+  const patch = req.body || {};
+  const allowed = [null, ...RATING_LADDER];
+  if (patch.maxRating !== undefined) {
+    const value = patch.maxRating || null;
+    if (!allowed.includes(value)) return res.status(400).json({ error: 'That is not a rating ECLIPSE knows' });
+    db.prepare('UPDATE users SET max_rating = ? WHERE id = ?').run(value, id);
+  }
+  if (patch.isKids !== undefined) {
+    db.prepare('UPDATE users SET is_kids = ? WHERE id = ?').run(patch.isKids ? 1 : 0, id);
+  }
+  res.json({ ok: true });
 });
 
 router.delete('/users/:id', (req, res) => {

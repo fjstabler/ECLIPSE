@@ -356,7 +356,21 @@ async function ProfilesPanel() {
           el('div', { style: { flex: 1 } },
             el('div', { class: 'fact__v' }, u.display_name),
             el('div', { style: { fontSize: '12px', color: 'var(--text-faint)' } },
-              [u.is_admin ? 'Administrator' : 'Viewer', u.is_kids ? 'Kids' : null].filter(Boolean).join(' · '))),
+              [u.is_admin ? 'Administrator' : 'Viewer', u.is_kids ? 'Kids' : null,
+                u.max_rating ? `${u.max_rating} and under` : null,
+                u.has_pin ? 'PIN set' : null].filter(Boolean).join(' · '))),
+          el('select', {
+            'aria-label': `Age limit for ${u.display_name}`,
+            title: 'Only titles rated at or below this appear on this profile',
+            onChange: async (e) => {
+              await api.adminUpdateUser(u.id, { maxRating: e.target.value || null });
+              toast(e.target.value ? `${u.display_name} is limited to ${e.target.value} and under` : 'Age limit removed');
+            },
+          }, [['', 'No age limit'], ['U', 'U'], ['PG', 'PG'], ['12', '12'], ['15', '15'], ['18', '18']].map(([v, label]) => {
+            const option = el('option', { value: v }, label);
+            if ((u.max_rating || '') === v) option.selected = true;
+            return option;
+          })),
           u.id === state.user.id
             ? el('span', { class: 'chip' }, 'You')
             : el('button', {
@@ -411,7 +425,47 @@ async function ProfilesPanel() {
       el('p', { class: 'panel__hint' }, `Signed in as ${state.user.display_name}. Ask an administrator to add more profiles.`)));
   }
 
+  wrap.append(PinPanel());
   return wrap;
+}
+
+/**
+ * A PIN for this profile. Worth its own panel because it's the thing that
+ * makes signing in on a TV bearable — four digits on a D-pad instead of a
+ * password typed one letter at a time.
+ */
+function PinPanel() {
+  const input = el('input', {
+    class: 'input', type: 'password', inputmode: 'numeric', maxlength: '8',
+    placeholder: '4 to 8 digits',
+  });
+
+  return el('div', { class: 'panel' },
+    el('h2', { class: 'panel__title' }, 'Sign-in PIN'),
+    el('p', { class: 'panel__hint' },
+      'Set a PIN and this profile can sign in with it instead of a password. Typing a real password with a TV remote is miserable enough that people choose bad ones to avoid it — a PIN on the TV and a password everywhere else is the better trade.'),
+    input,
+    el('div', { style: { marginTop: '14px', display: 'flex', gap: '10px' } },
+      el('button', {
+        class: 'btn btn--corona', type: 'button',
+        onClick: async () => {
+          try {
+            await api.setPin(input.value);
+            input.value = '';
+            toast('PIN saved');
+          } catch (err) {
+            toast(err.message);
+          }
+        },
+      }, 'Save PIN'),
+      el('button', {
+        class: 'btn btn--ghost', type: 'button',
+        onClick: async () => {
+          await api.setPin('');
+          input.value = '';
+          toast('PIN removed — this profile signs in with its password');
+        },
+      }, 'Remove PIN')));
 }
 
 function AboutPanel() {
@@ -429,7 +483,7 @@ function AboutPanel() {
         // to confirm a server is actually running what was just pushed,
         // rather than guessing from symptoms whether a git pull + restart
         // happened. Read this back rather than re-describing what's broken.
-        el('div', { class: 'fact__v' }, '2026-08-27.2')),
+        el('div', { class: 'fact__v' }, '2026-09-09.1')),
       el('div', { class: 'fact' },
         el('div', { class: 'fact__k' }, 'KEYBOARD'),
         el('div', { class: 'fact__v' }, 'Space play/pause · ← → skip 10s · F fullscreen · M mute · C subtitles · / search · Esc close'))));

@@ -24,6 +24,21 @@ export function AuthView({ onSignedIn }) {
       onKeydown: (e) => { if (e.key === 'Enter') submit(); },
     });
 
+    // Whether the chosen profile signs in with a PIN. Picking one that has a
+    // PIN swaps the password box for a numeric one — four digits on a D-pad
+    // rather than a password typed one letter at a time.
+    let usingPin = false;
+    const credentialLabel = el('label', {}, 'PASSWORD');
+    const credentialField = el('div', { class: 'auth__field' }, credentialLabel, password);
+
+    const useCredential = (pinMode) => {
+      usingPin = pinMode;
+      credentialLabel.textContent = pinMode ? 'PIN' : 'PASSWORD';
+      password.placeholder = pinMode ? 'PIN' : (firstRun ? 'Choose a password' : 'Password');
+      password.setAttribute('inputmode', pinMode ? 'numeric' : 'text');
+      password.value = '';
+    };
+
     const submitBtn = el('button', {
       class: 'btn btn--corona', type: 'button',
       style: { width: '100%', marginTop: '8px' },
@@ -42,8 +57,8 @@ export function AuthView({ onSignedIn }) {
       try {
         const body = {
           username: username.value.trim(),
-          password: password.value,
           displayName: displayName.value.trim() || username.value.trim(),
+          ...(usingPin ? { pin: password.value } : { password: password.value }),
         };
         const res = firstRun ? await api.setup(body) : await api.login(body);
         state.user = res.user;
@@ -63,11 +78,12 @@ export function AuthView({ onSignedIn }) {
           info.profiles.map((p) =>
             el('button', {
               class: 'profilepick', type: 'button',
-              onClick: () => { username.value = p.username; password.focus(); },
+              onClick: () => { username.value = p.username; useCredential(Boolean(p.hasPin)); password.focus(); },
             },
               el('div', { class: 'profilepick__face', style: { background: p.avatarColor } },
                 (p.displayName || p.username)[0].toUpperCase()),
-              el('span', { class: 'profilepick__name' }, p.displayName))))
+              el('span', { class: 'profilepick__name' }, p.displayName),
+              p.hasPin ? el('span', { class: 'profilepick__hint' }, 'PIN') : null)))
       : null;
 
     clear(root).append(
@@ -84,8 +100,7 @@ export function AuthView({ onSignedIn }) {
         firstRun
           ? el('div', { class: 'auth__field' }, el('label', {}, 'DISPLAY NAME'), displayName)
           : null,
-        el('div', { class: 'auth__field' },
-          el('label', {}, 'PASSWORD'), password),
+        credentialField,
         submitBtn,
         firstRun
           ? el('p', { style: { fontSize: '12px', color: 'var(--text-faint)', marginTop: '18px', lineHeight: '1.55', textAlign: 'center' } },

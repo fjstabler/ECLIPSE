@@ -1,7 +1,7 @@
 import express from 'express';
 import { isFirstRun } from '../db.js';
 import {
-  authenticate, createUser, createSession, destroySession, listUsers,
+  authenticate, authenticateWithPin, setPin, createUser, createSession, destroySession, listUsers,
   setSessionCookie, clearSessionCookie, requireAuth, requireAdmin,
 } from '../auth.js';
 import { getTasteProfile, saveTasteProfile } from '../nova/engine.js';
@@ -22,6 +22,9 @@ router.get('/me', (req, res) => {
     profiles: isFirstRun() ? [] : listUsers().map((u) => ({
       id: u.id, username: u.username, displayName: u.display_name,
       avatarColor: u.avatar_color, isKids: u.is_kids === 1,
+      // Lets the sign-in screen ask for four digits instead of a password,
+      // which is the difference between painless and miserable on a remote.
+      hasPin: u.has_pin === 1,
     })),
     features: {
       nova: novaAvailable(),
@@ -51,8 +54,18 @@ router.post('/setup', async (req, res) => {
 });
 
 router.post('/login', async (req, res) => {
-  const user = await authenticate(req.body.username, req.body.password);
-  if (!user) return res.status(401).json({ error: 'That username and password do not match' });
+  // Either credential opens the same door. A PIN only works if the profile
+  // has set one; it is never a way around a password that exists.
+  const usingPin = Boolean(req.body.pin);
+  const user = usingPin
+    ? await authenticateWithPin(req.body.username, req.body.pin)
+    : await authenticate(req.body.username, req.body.password);
+
+  if (!user) {
+    return res.status(401).json({
+      error: usingPin ? 'That PIN is not right' : 'That username and password do not match',
+    });
+  }
   const { token, expires } = createSession(user.id);
   setSessionCookie(res, token, expires);
   res.json({ user });
@@ -98,6 +111,15 @@ router.put('/taste', requireAuth, (req, res) => {
 });
 
 /** Playback settings — how this viewer wants the player to behave. */
+/** Set or clear this profile's PIN. */
+router.put('/pin', requireAuth, async (req, res) => {
+  try {
+    res.json(await setPin(req.user.id, req.body?.pin));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 router.get('/preferences', requireAuth, (req, res) => {
   res.json(getPreferences(req.user.id));
 });

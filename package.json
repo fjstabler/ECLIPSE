@@ -13,7 +13,8 @@
     "dev": "node --watch server/index.js",
     "scan": "node scripts/scan.js",
     "demo": "node scripts/seed-demo.js",
-    "reset": "node scripts/reset.js"
+    "reset": "node scripts/reset.js",
+    "selftest": "node scripts/selftest.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",

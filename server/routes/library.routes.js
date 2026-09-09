@@ -11,6 +11,20 @@ export const router = express.Router();
 
 router.use(requireAuth);
 
+/**
+ * Every list of titles leaves through here.
+ *
+ * The rating filter is applied in SQL wherever a query is ours to write, but
+ * the home screen is assembled from half a dozen different queries in the
+ * recommendation engine, and a child's home screen is the most visible place
+ * for a limit to leak. One choke point on the way out is worth more than
+ * remembering to add a clause to every future query.
+ */
+function permitted(items, user) {
+  if (!user?.max_rating || !Array.isArray(items)) return items;
+  return items.filter((t) => isAllowed(t.certification, user.max_rating));
+}
+
 /** The home screen: hero + every shelf, in one round trip. */
 router.get('/home', (req, res) => {
   const userId = req.user.id;
@@ -22,11 +36,16 @@ router.get('/home', (req, res) => {
   const watchlist = library.getWatchlist(userId, 18);
   if (watchlist.length) rows.push({ id: 'watchlist', title: 'Your list', items: watchlist });
 
+  const favourites = library.getFavourites(userId, 18);
+  if (favourites.length) rows.push({ id: 'favourites', title: 'Your favourites', items: favourites });
+
   rows.push(...homeRows(userId));
+
+  for (const row of rows) row.items = permitted(row.items, req.user);
 
   // The hero is the strongest N.O.V.A. pick with a backdrop to show behind it.
   const novaRow = rows.find((r) => r.id === 'for-you');
-  const heroPool = (novaRow?.items || rows[0]?.items || []).filter((t) => t.backdrop);
+  const heroPool = (novaRow?.items || rows.find((r) => r.items.length)?.items || []).filter((t) => t.backdrop);
   const hero = heroPool[0] ? library.getTitleDetail(heroPool[0].id, userId) : null;
 
   res.json({ hero, rows: rows.filter((r) => r.items.length) });
@@ -55,7 +74,7 @@ router.get('/titles/:id', (req, res) => {
   if (!isAllowed(detail.certification, req.user.max_rating)) {
     return res.status(403).json({ error: 'This title is not available on this profile' });
   }
-  detail.similar = similarTo(detail.id, { limit: 12 });
+  detail.similar = permitted(similarTo(detail.id, { limit: 12 }), req.user);
   res.json(detail);
 });
 
@@ -175,15 +194,15 @@ router.get('/people/:name', (req, res) => {
 
 router.get('/recommendations', (req, res) => {
   res.json({
-    items: recommend(req.user.id, {
+    items: permitted(recommend(req.user.id, {
       limit: Math.min(Number(req.query.limit) || 20, 40),
       kind: req.query.kind || null,
-    }),
+    }), req.user),
   });
 });
 
 router.get('/titles/:id/similar', (req, res) => {
-  res.json({ items: similarTo(Number(req.params.id), { limit: 12 }) });
+  res.json({ items: permitted(similarTo(Number(req.params.id), { limit: 12 }), req.user) });
 });
 
 // --- viewer actions ---------------------------------------------------------
@@ -217,7 +236,7 @@ router.post('/titles/:id/favourite', (req, res) => {
 });
 
 router.get('/favourites', (req, res) => {
-  res.json({ items: getFavourites(req.user.id) });
+  res.json({ items: permitted(getFavourites(req.user.id), req.user) });
 });
 
 router.get('/libraries', (req, res) => {
@@ -241,9 +260,9 @@ router.post('/titles/:id/watchlist', (req, res) => {
 });
 
 router.get('/watchlist', (req, res) => {
-  res.json({ items: library.getWatchlist(req.user.id, 100) });
+  res.json({ items: permitted(library.getWatchlist(req.user.id, 100), req.user) });
 });
 
 router.get('/history', (req, res) => {
-  res.json({ items: library.watchHistory(req.user.id, 100) });
+  res.json({ items: permitted(library.watchHistory(req.user.id, 100), req.user) });
 });

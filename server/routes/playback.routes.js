@@ -2,9 +2,13 @@ import express from 'express';
 import { db } from '../db.js';
 import { requireAuth } from '../auth.js';
 import { getMediaFile } from '../library.js';
+import { requirePermittedFile } from '../parental.js';
 
 export const router = express.Router();
 router.use(requireAuth);
+// Progress, history and watched-marks all name a file in the body; a
+// restricted profile has no business writing state for one it can't play.
+router.use(requirePermittedFile);
 
 /**
  * The player posts progress every few seconds. This is what powers

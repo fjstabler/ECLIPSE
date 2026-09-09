@@ -8,6 +8,8 @@
  * ECLIPSE couldn't classify it.
  */
 
+import { db } from './db.js';
+
 const RANKS = {
   // United Kingdom (BBFC)
   U: 0, UC: 0, PG: 1, '12': 2, '12A': 2, '15': 3, '18': 4, R18: 5,
@@ -58,4 +60,39 @@ export function ratingSqlFilter(maxRating) {
 
   if (!allowed.length) return 'AND 0';
   return `AND t.certification IS NOT NULL AND UPPER(TRIM(t.certification)) IN (${allowed.join(', ')})`;
+}
+
+const certificationForFile = db.prepare(
+  'SELECT t.certification FROM media_files mf JOIN titles t ON t.id = mf.title_id WHERE mf.id = ?'
+);
+
+/**
+ * Whether a profile may play a specific file.
+ *
+ * Hiding a title from the shelves is presentation; this is the part that
+ * actually enforces the limit. A file id is guessable, clients cache them,
+ * and a title that has been hidden since the last sync is still one HTTP
+ * request away — so every route that hands over bytes, or records that
+ * someone watched them, asks here rather than trusting that the viewer could
+ * only have arrived from a page they were allowed to see.
+ */
+export function canPlayFile(fileId, user) {
+  if (!user?.max_rating) return true;
+  const row = certificationForFile.get(fileId);
+  // A file with no title behind it is a 404 elsewhere; don't let it pass here.
+  if (!row) return false;
+  return isAllowed(row.certification, user.max_rating);
+}
+
+/**
+ * Express guard for the routes that serve or record media, keyed on whichever
+ * of the usual places the file id arrives in.
+ */
+export function requirePermittedFile(req, res, next) {
+  const fileId = Number(req.params.fileId ?? req.body?.fileId ?? req.query?.fileId);
+  if (!Number.isFinite(fileId)) return next();
+  if (!canPlayFile(fileId, req.user)) {
+    return res.status(403).json({ error: 'This title is not available on this profile' });
+  }
+  next();
 }

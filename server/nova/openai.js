@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 import { config } from '../config.js';
 import { db } from '../db.js';
 import { toolDefinitions, runTool, buildSystemPrompt } from './tools.js';
+import { isAllowed } from '../parental.js';
 import { recommend } from './engine.js';
 import { getTitle } from '../library.js';
 
@@ -188,7 +189,10 @@ export async function streamNova({ user, message, emit }) {
         }
 
         try {
-          const { result, refs: newRefs } = runTool(call.function.name, parsed, { userId });
+          const { result, refs: newRefs } = runTool(call.function.name, parsed, {
+            userId,
+            maxRating: user.max_rating || null,
+          });
           for (const id of newRefs) refs.add(id);
           messages.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
         } catch (err) {
@@ -209,7 +213,9 @@ export async function streamNova({ user, message, emit }) {
     });
     const cards = (mentioned.length ? mentioned : [...refs].slice(0, 6))
       .map((id) => getTitle(id))
-      .filter(Boolean)
+      // The last gate before a card is drawn: the tools already filter, and
+      // this makes sure a future source of refs can't quietly route around it.
+      .filter((t) => t && isAllowed(t.certification, user.max_rating || null))
       .slice(0, 8);
 
     if (cards.length) emit({ type: 'refs', titles: cards });
@@ -295,7 +301,8 @@ function fallbackReply({ user, message, emit }) {
   const wantsFilm = /\b(film|movie|feature)\b/i.test(message);
   const kind = wantsSeries && !wantsFilm ? 'series' : wantsFilm && !wantsSeries ? 'movie' : null;
 
-  const picks = recommend(userId, { limit: 4, kind });
+  const picks = recommend(userId, { limit: 4, kind })
+    .filter((t) => isAllowed(t.certification, user.max_rating || null));
 
   let text;
   if (!picks.length) {

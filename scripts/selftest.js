@@ -9,6 +9,10 @@ const MODULES = [
   '../server/library.js',
   '../server/auth.js',
   '../server/log.js',
+  '../server/parental.js',
+  '../server/preferences.js',
+  '../server/libraries.js',
+  '../server/health.js',
   '../server/util/parse.js',
   '../server/media/probe.js',
   '../server/media/streams.js',
@@ -141,6 +145,72 @@ if (titleCount === 0) {
 
 db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
 
+// --- parental limits --------------------------------------------------------
+// A limit that looks configured and quietly allows everything is worse than no
+// limit at all, so this walks the real path: the user as a request sees them,
+// through the same query the API uses.
+
+console.log('\nparental limits');
+{
+  const { isAllowed } = await import('../server/parental.js');
+  const { getUserById } = await import('../server/auth.js');
+
+  check('an 18 is blocked on a PG profile', isAllowed('18', 'PG') === false);
+  check('a U is allowed on a PG profile', isAllowed('U', 'PG') === true);
+  check('an unrated title is blocked on a limited profile', isAllowed(null, 'PG') === false);
+  check('nothing is blocked without a limit', isAllowed('18', null) === true);
+
+  const limited = await createUser({
+    username: `selftest_kid_${Date.now()}`, displayName: 'Kid', password: 'testing123',
+  });
+  db.prepare('UPDATE users SET max_rating = ? WHERE id = ?').run('PG', limited.id);
+
+  // The row the API actually reads on each request must carry the limit.
+  const asRequestSeesThem = getUserById(limited.id);
+  check('the limit travels with the user on a request', asRequestSeesThem.max_rating === 'PG',
+    `got ${JSON.stringify(asRequestSeesThem.max_rating)}`);
+
+  const { listTitles } = await import('../server/library.js');
+  const blocked = listTitles({ maxRating: 'PG', limit: 200 })
+    .filter((t) => !isAllowed(t.certification, 'PG'));
+  check('a limited listing contains nothing above the limit', blocked.length === 0,
+    blocked.map((t) => `${t.title} (${t.certification})`).join(', '));
+
+  // Hiding a title from the shelves is not the same as refusing to play it.
+  // File ids are guessable and clients cache them, so the guard the streaming
+  // routes use gets checked on a real file rather than assumed.
+  const { canPlayFile } = await import('../server/parental.js');
+  const overTheLimit = db
+    .prepare(`
+      SELECT mf.id FROM media_files mf JOIN titles t ON t.id = mf.title_id
+      WHERE t.certification IS NOT NULL AND UPPER(TRIM(t.certification)) IN ('18','R','NC-17','TV-MA')
+      LIMIT 1
+    `)
+    .get();
+  if (overTheLimit) {
+    check('a limited profile cannot play a file it is not allowed to see',
+      canPlayFile(overTheLimit.id, { max_rating: 'PG' }) === false);
+    check('an unrestricted profile still can',
+      canPlayFile(overTheLimit.id, { max_rating: null }) === true);
+  } else {
+    console.log('  note  no 18-rated file in this library — the streaming guard was not exercised');
+  }
+  check('a file that does not exist is refused rather than allowed',
+    canPlayFile(-1, { max_rating: 'PG' }) === false);
+
+  // N.O.V.A. reads the library through the profile's eyes: she cannot
+  // recommend what she was never shown.
+  if (db.prepare('SELECT COUNT(*) AS n FROM titles').get().n > 0) {
+    const { runTool: novaTool } = await import('../server/nova/tools.js');
+    const seen = novaTool('search_library', { limit: 40 }, { userId: limited.id, maxRating: 'PG' })
+      .result.titles.filter((t) => !isAllowed(t.certification, 'PG'));
+    check('N.O.V.A. is not shown titles above the profile limit', seen.length === 0,
+      seen.map((t) => `${t.title} (${t.certification})`).join(', '));
+  }
+
+  db.prepare('DELETE FROM users WHERE id = ?').run(limited.id);
+}
+
 // --- media inspection -------------------------------------------------------
 // Builds a real file with several audio and subtitle tracks and reads it back,
 // because "ECLIPSE understands what's actually in your files" is a claim worth
@@ -214,6 +284,70 @@ console.log('\nmedia inspection');
 
     fsp.rmSync(dir, { recursive: true, force: true });
   }
+}
+
+// --- the server actually starts ---------------------------------------------
+// Importing a module only proves it parses. A name referenced inside a function
+// that nobody called — a missing import in the boot path — parses perfectly and
+// then takes the whole server down on start. So this starts it the way `npm
+// start` does, against a scratch data directory, and waits for it to answer.
+
+console.log('\nserver start-up');
+{
+  const { spawn } = await import('node:child_process');
+  const os = await import('node:os');
+  const fsp = await import('node:fs');
+  const pathMod = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+
+  const here = pathMod.dirname(fileURLToPath(import.meta.url));
+  const dataDir = fsp.mkdtempSync(pathMod.join(os.tmpdir(), 'eclipse-boot-'));
+  const port = 8000 + Math.floor(Math.random() * 1500);
+
+  const child = spawn(process.execPath, [pathMod.join(here, '..', 'server', 'index.js')], {
+    env: {
+      ...process.env,
+      PORT: String(port),
+      ECLIPSE_DATA_DIR: dataDir,
+      ECLIPSE_MOVIES_DIR: '',
+      ECLIPSE_SERIES_DIR: '',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  let output = '';
+  child.stdout.on('data', (d) => { output += d; });
+  child.stderr.on('data', (d) => { output += d; });
+
+  let answered = false;
+  for (let i = 0; i < 40 && !answered && child.exitCode === null; i += 1) {
+    await new Promise((r) => setTimeout(r, 250));
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/auth/me`);
+      answered = res.ok;
+    } catch {
+      // not listening yet
+    }
+  }
+
+  check('the server boots and answers a request', answered,
+    child.exitCode !== null
+      ? `it exited with code ${child.exitCode}: ${lastError(output)}`
+      : `no response on port ${port} after 10s`);
+
+  // A crash after the port opens — the watcher, a background scan — still
+  // counts as a broken start.
+  check('nothing on the boot path threw', !/^\s*(ReferenceError|TypeError|SyntaxError)/m.test(output),
+    lastError(output));
+
+  child.kill('SIGTERM');
+  await new Promise((r) => { child.once('exit', r); setTimeout(r, 3000); });
+  fsp.rmSync(dataDir, { recursive: true, force: true });
+}
+
+function lastError(output) {
+  const line = output.split('\n').reverse().find((l) => /Error|error:/.test(l));
+  return (line || '').trim().slice(0, 200);
 }
 
 console.log(failures === 0 ? '\nAll checks passed.\n' : `\n${failures} check(s) failed.\n`);
