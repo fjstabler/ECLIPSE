@@ -83,6 +83,10 @@ function memoryUsage() {
  */
 function storageUsage() {
   const seen = new Set();
+  // Keyed by filesystem, not by path: a NAS with the data directory and three
+  // library folders on one volume is one bar showing all four names, not four
+  // identical bars.
+  const byDevice = new Map();
   const volumes = [];
 
   const add = (label, target) => {
@@ -90,18 +94,29 @@ function storageUsage() {
     seen.add(target);
     try {
       const stat = fs.statfsSync(target);
+      const device = String(fs.statSync(target).dev);
+      const existing = byDevice.get(device);
+      if (existing) {
+        if (!existing.labels.includes(label)) existing.labels.push(label);
+        existing.label = existing.labels.join(', ');
+        return;
+      }
+
       const total = stat.blocks * stat.bsize;
       const free = stat.bavail * stat.bsize;
-      volumes.push({
+      const volume = {
         label,
+        labels: [label],
         path: target,
         total,
         free,
         used: total - free,
         percent: total > 0 ? Math.round(((total - free) / total) * 100) : null,
-      });
+      };
+      byDevice.set(device, volume);
+      volumes.push(volume);
     } catch {
-      volumes.push({ label, path: target, error: 'unreadable' });
+      volumes.push({ label, labels: [label], path: target, error: 'unreadable' });
     }
   };
 

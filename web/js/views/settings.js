@@ -13,8 +13,10 @@ const AVOID = ['gore', 'jump scares', 'sad endings', 'animal harm', 'found foota
 export async function SettingsView({ outlet }) {
   const tabs = [
     { id: 'taste', label: 'Taste profile' },
+    { id: 'playback', label: 'Playback' },
     { id: 'library', label: 'Library' },
     { id: 'profiles', label: 'Profiles' },
+    ...(state.user?.is_admin ? [{ id: 'server', label: 'Server' }] : []),
     { id: 'about', label: 'About' },
   ];
 
@@ -37,11 +39,18 @@ export async function SettingsView({ outlet }) {
   async function renderTab() {
     clear(body);
     body.append(el('div', { class: 'skeleton', style: { height: '200px' } }));
-    const node =
-      activeTab === 'taste' ? await TastePanel()
-      : activeTab === 'library' ? await LibraryPanel()
-      : activeTab === 'profiles' ? await ProfilesPanel()
-      : AboutPanel();
+    let node;
+    try {
+      node =
+        activeTab === 'taste' ? await TastePanel()
+        : activeTab === 'playback' ? await PlaybackPanel()
+        : activeTab === 'library' ? await LibraryPanel()
+        : activeTab === 'profiles' ? await ProfilesPanel()
+        : activeTab === 'server' ? await ServerPanel()
+        : AboutPanel();
+    } catch (err) {
+      node = panelError(err, renderTab);
+    }
     clear(body).append(node);
   }
 
@@ -245,19 +254,7 @@ async function LibraryPanel() {
         stat(formatBytes(status.stats.totalBytes), 'ON DISK'),
         stat(status.stats.unmatched, 'UNMATCHED'))),
 
-    el('div', { class: 'panel' },
-      el('h2', { class: 'panel__title' }, 'Watched folders'),
-      el('p', { class: 'panel__hint' }, 'Set with ECLIPSE_MOVIES_DIR and ECLIPSE_SERIES_DIR in your .env file. New files appear automatically; a scan catches anything the watcher missed.'),
-      status.libraries.length
-        ? el('div', { class: 'factlist' },
-            status.libraries.map((l) =>
-              el('div', { class: 'fact' },
-                el('div', { class: 'fact__k' }, l.kind.toUpperCase()),
-                el('div', { class: 'fact__v', style: { color: l.exists ? '' : 'var(--bad)' } },
-                  l.path, l.exists ? '' : ' — folder not found'))))
-        : el('p', { style: { color: 'var(--bad)', fontSize: '14px' } }, 'No library folders are configured yet.'),
-      el('div', { style: { marginTop: '20px' } }, scanBtn, fullScanBtn),
-      scanInfo),
+    LibrariesCard(status.libraries, scanBtn, fullScanBtn, scanInfo),
 
     el('div', { class: 'panel' },
       el('h2', { class: 'panel__title' }, 'Integrations'),
@@ -436,4 +433,470 @@ function AboutPanel() {
       el('div', { class: 'fact' },
         el('div', { class: 'fact__k' }, 'KEYBOARD'),
         el('div', { class: 'fact__v' }, 'Space play/pause · ← → skip 10s · F fullscreen · M mute · C subtitles · / search · Esc close'))));
+}
+
+// --- playback ---------------------------------------------------------------
+
+const SUBTITLE_COLOURS = [
+  ['#ffffff', 'White'], ['#f5e663', 'Yellow'], ['#9ee7ff', 'Pale blue'], ['#bdbdbd', 'Grey'],
+];
+
+/**
+ * How playback behaves for this viewer. Everything saves as you change it —
+ * a settings page with a Save button people forget to press is a settings
+ * page that quietly does nothing.
+ */
+async function PlaybackPanel() {
+  const prefs = await api.preferences();
+
+  const save = debounce(async (patch) => {
+    Object.assign(prefs, patch);
+    try {
+      await api.savePreferences(patch);
+    } catch (err) {
+      toast(err.message || 'That setting could not be saved');
+    }
+  }, 250);
+
+  // A live sample, so the size and colour controls show what they mean
+  // rather than describing it.
+  const sample = el('div', { class: 'subpreview' },
+    el('div', { class: 'subpreview__cue' }, 'The quick brown fox jumps over the lazy dog'));
+
+  const applyPreview = () => {
+    sample.style.setProperty('--sub-size', String((prefs.subtitleSize || 100) / 100));
+    sample.style.setProperty('--sub-colour', prefs.subtitleColour || '#ffffff');
+    sample.style.setProperty('--sub-bg', `rgba(0, 0, 0, ${prefs.subtitleBackground ?? 0.55})`);
+  };
+
+  const panel = el('div', { class: 'panel-stack' },
+    card('While watching',
+      'What happens on its own, without you reaching for the remote.',
+      el('div', { class: 'setting-list' },
+        toggleRow('Play the next episode automatically', prefs.autoplayNext, (on) => save({ autoplayNext: on })),
+        choiceRow('Intros and recaps', prefs.skipIntro, [
+          ['ask', 'Offer a skip button'], ['auto', 'Skip them for me'], ['off', 'Leave them alone'],
+        ], (v) => save({ skipIntro: v }),
+          'Only offered when the file marks where the intro is — ECLIPSE never guesses at it.'),
+        choiceRow('End credits', prefs.skipCredits, [
+          ['ask', 'Offer a skip button'], ['auto', 'Skip them for me'], ['off', 'Leave them alone'],
+        ], (v) => save({ skipCredits: v })))),
+
+    card('Languages',
+      'Used when a file actually has the track. Nothing here invents one.',
+      el('div', { class: 'setting-list' },
+        textRow('Preferred audio language', prefs.audioLanguage || '', 'e.g. English, or eng',
+          (v) => save({ audioLanguage: v || null })),
+        textRow('Preferred subtitle language', prefs.subtitleLanguage || '', 'e.g. Japanese, or jpn',
+          (v) => save({ subtitleLanguage: v || null })),
+        toggleRow('Turn subtitles on by default', prefs.subtitlesDefault, (on) => save({ subtitlesDefault: on })),
+        el('p', { class: 'setting-note' },
+          'With subtitles off, a track marked "forced" still appears — that’s the one translating signs and other languages.'))),
+
+    card('How subtitles look', null,
+      el('div', { class: 'setting-list' },
+        sample,
+        sliderRow('Size', prefs.subtitleSize, 50, 250, 5, (v) => { prefs.subtitleSize = v; applyPreview(); save({ subtitleSize: v }); }, (v) => `${v}%`),
+        sliderRow('Background', Math.round((prefs.subtitleBackground ?? 0.55) * 100), 0, 100, 5,
+          (v) => { prefs.subtitleBackground = v / 100; applyPreview(); save({ subtitleBackground: v / 100 }); }, (v) => `${v}%`),
+        sliderRow('Height on screen', prefs.subtitlePosition, 50, 98, 1,
+          (v) => save({ subtitlePosition: v }), (v) => `${v}%`),
+        el('div', { class: 'setting-row' },
+          el('div', { class: 'setting-row__label' }, 'Colour'),
+          el('div', { class: 'pill-choice' },
+            SUBTITLE_COLOURS.map(([hex, name]) =>
+              el('button', {
+                type: 'button',
+                class: prefs.subtitleColour === hex ? 'is-on' : '',
+                onClick: (e) => {
+                  for (const b of e.currentTarget.parentElement.children) b.classList.remove('is-on');
+                  e.currentTarget.classList.add('is-on');
+                  prefs.subtitleColour = hex;
+                  applyPreview();
+                  save({ subtitleColour: hex });
+                },
+              }, el('span', { class: 'swatch', style: { background: hex } }), name)))))),
+
+    card('Quality',
+      'Caps every stream sent to this profile. Useful over a slow connection, or on a TV that struggles with 4K.',
+      el('div', { class: 'setting-list' },
+        choiceRow('Maximum resolution', String(prefs.maxHeight || 0), [
+          ['0', 'Whatever the file is'], ['2160', '4K'], ['1080', '1080p'], ['720', '720p'], ['480', '480p'],
+        ], (v) => save({ maxHeight: Number(v) })),
+        choiceRow('Maximum bitrate', String(prefs.maxBitrate || 0), [
+          ['0', 'Unlimited'], ['20000000', '20 Mbps'], ['8000000', '8 Mbps'], ['4000000', '4 Mbps'], ['2000000', '2 Mbps'],
+        ], (v) => save({ maxBitrate: Number(v) })),
+        el('p', { class: 'setting-note' },
+          'A cap means the server re-encodes rather than sending the file as-is, which costs it some work.'))));
+
+  applyPreview();
+  return panel;
+}
+
+// --- server -----------------------------------------------------------------
+
+/**
+ * What the machine is doing, and what it's doing it for. Refreshes itself
+ * while the tab is open, because "is it still scanning" is a question you ask
+ * by looking, not by pressing reload.
+ */
+async function ServerPanel() {
+  const panel = el('div', { class: 'panel-stack' });
+  const health = el('div', {});
+  const sessions = el('div', {});
+  const logs = el('div', {});
+  panel.append(health, sessions, logs);
+
+  let timer = null;
+  let stopped = false;
+
+  async function refresh() {
+    let status;
+    try {
+      status = await api.adminStatus();
+    } catch (err) {
+      clear(health).append(panelError(err, refresh));
+      return;
+    }
+    if (stopped) return;
+
+    clear(health).append(HealthCard(status));
+    clear(sessions).append(SessionsCard(status, refresh));
+  }
+
+  async function refreshLogs() {
+    try {
+      const { logs: rows } = await api.adminLogs();
+      if (!stopped) clear(logs).append(LogsCard(rows));
+    } catch { /* the panel above already reports a dead server */ }
+  }
+
+  await refresh();
+  await refreshLogs();
+
+  // Poll while the tab is on screen, and stop the moment it isn't — a
+  // settings page left open shouldn't keep waking a Fire TV's CPU.
+  timer = setInterval(() => {
+    if (!panel.isConnected) { clearInterval(timer); stopped = true; return; }
+    refresh();
+  }, 5000);
+
+  return panel;
+}
+
+function HealthCard(status) {
+  const h = status.health;
+  const i = status.integrations;
+
+  return card('This server', `${h.hostname} · ${h.platform} · Node ${h.node} · up ${formatUptime(h.uptime)}`,
+    el('div', {},
+      el('div', { class: 'meter-grid' },
+        meter('Processor', h.cpu.percent, h.cpu.percent == null ? h.cpu.loadAverage[0].toFixed(2) + ' load' : `${h.cpu.percent}%`,
+          `${h.cpu.cores} cores · ${h.cpu.model}`),
+        meter('Memory', h.memory.percent, `${formatBytes(h.memory.used)} of ${formatBytes(h.memory.total)}`,
+          `ECLIPSE itself is using ${formatBytes(h.memory.process)}`),
+        ...h.storage.filter((v) => !v.error).map((v) =>
+          meter(v.label, v.percent, `${formatBytes(v.free)} free`, v.path))),
+
+      el('div', { class: 'stat-row' },
+        stat(status.stats.movies, 'Films'),
+        stat(status.stats.series, 'Series'),
+        stat(status.stats.episodes, 'Episodes'),
+        stat(formatBytes(status.stats.totalBytes), 'On disk'),
+        stat(`${i.transcodesRunning}/${i.maxTranscodes}`, 'Converting')),
+
+      el('div', { class: 'chip-row' },
+        featureChip('Artwork & metadata', i.tmdb, 'TMDB key set', 'No TMDB key'),
+        featureChip('N.O.V.A. conversation', i.nova, 'Connected', 'No OpenAI key'),
+        featureChip('Converting', i.transcode, i.hardware, 'Disabled'),
+        featureChip('Watching folders', i.watching, 'On', 'Off'))));
+}
+
+function SessionsCard(status, refresh) {
+  const rows = status.sessions;
+  return card('Playing now', rows.length ? null : 'Nothing is playing.',
+    el('div', {},
+      rows.length
+        ? el('div', { class: 'session-list' }, rows.map((s) => SessionRow(s, refresh)))
+        : null,
+      el('h4', { class: 'subhead' }, 'Devices'),
+      status.devices.length
+        ? el('div', { class: 'device-list' }, status.devices.map((d) =>
+            el('div', { class: 'device' },
+              el('div', {},
+                el('div', { class: 'device__name' }, d.name),
+                el('div', { class: 'device__meta' },
+                  [d.user, `last seen ${formatWhen(d.lastSeen)}`].filter(Boolean).join(' · '))),
+              el('button', {
+                class: 'btn btn--ghost btn--sm', type: 'button',
+                onClick: async () => {
+                  const name = prompt('What should this device be called?', d.name);
+                  if (!name) return;
+                  await api.adminRenameDevice(d.id, name);
+                  refresh();
+                },
+              }, 'Rename'))))
+        : el('p', { class: 'setting-note' }, 'No devices have connected yet.')));
+}
+
+function SessionRow(s, refresh) {
+  const methodLabel = { direct: 'Direct play', remux: 'Repackaging', transcode: 'Converting' }[s.method] || s.method;
+  return el('div', { class: 'session' },
+    el('div', { class: 'session__main' },
+      el('div', { class: 'session__title' },
+        s.title, s.episode ? ` · S${s.episode.season} E${s.episode.number}` : ''),
+      el('div', { class: 'session__meta' },
+        [`${s.user} on ${s.device}`, methodLabel, s.hardware, s.source && s.target && s.source !== s.target ? `${s.source} → ${s.target}` : null]
+          .filter(Boolean).join(' · ')),
+      s.reasons?.length ? el('div', { class: 'session__why' }, s.reasons.join('. ')) : null,
+      el('div', { class: 'session__bar' }, el('span', { style: { width: `${Math.round(s.progress * 100)}%` } }))),
+    el('button', {
+      class: 'btn btn--ghost btn--sm', type: 'button',
+      onClick: async () => { await api.adminStopSession(s.id); refresh(); },
+    }, 'Stop'));
+}
+
+function LogsCard(rows) {
+  return card('Recent activity', 'The last few things the server did, newest first.',
+    rows.length
+      ? el('div', { class: 'log-list' }, rows.slice(0, 60).map((r) =>
+          el('div', { class: `log log--${r.level}` },
+            el('span', { class: 'log__time' }, formatWhen(r.at)),
+            el('span', { class: 'log__scope' }, r.scope),
+            el('span', { class: 'log__msg' }, r.message + (r.detail ? ` — ${r.detail}` : '')))))
+      : el('p', { class: 'setting-note' }, 'Nothing logged yet.'));
+}
+
+// --- shared bits ------------------------------------------------------------
+
+function card(title, subtitle, body) {
+  return el('section', { class: 'card-panel' },
+    el('h3', { class: 'card-panel__title' }, title),
+    subtitle ? el('p', { class: 'card-panel__sub' }, subtitle) : null,
+    body);
+}
+
+function meter(label, percent, value, note) {
+  const pct = typeof percent === 'number' ? Math.max(0, Math.min(100, percent)) : null;
+  return el('div', { class: 'meter' },
+    el('div', { class: 'meter__head' },
+      el('span', { class: 'meter__label' }, label),
+      el('span', { class: 'meter__value' }, value)),
+    el('div', { class: 'meter__track' },
+      el('span', {
+        class: `meter__fill${pct != null && pct > 90 ? ' is-high' : ''}`,
+        style: { width: `${pct ?? 0}%` },
+      })),
+    note ? el('div', { class: 'meter__note' }, note) : null);
+}
+
+function featureChip(label, on, onText, offText) {
+  return el('div', { class: `feature-chip${on ? ' is-on' : ''}` },
+    el('span', { class: 'feature-chip__dot' }),
+    el('span', {}, label),
+    el('span', { class: 'feature-chip__state' }, on ? onText : offText));
+}
+
+function toggleRow(label, value, onChange, note) {
+  const input = el('input', { type: 'checkbox', onChange: (e) => onChange(e.target.checked) });
+  input.checked = Boolean(value);
+  return el('label', { class: 'setting-row setting-row--toggle' },
+    el('div', {},
+      el('div', { class: 'setting-row__label' }, label),
+      note ? el('div', { class: 'setting-row__note' }, note) : null),
+    el('span', { class: 'switch' }, input, el('span', { class: 'switch__track' })));
+}
+
+function choiceRow(label, value, options, onChange, note) {
+  const select = el('select', { onChange: (e) => onChange(e.target.value) },
+    options.map(([v, text]) => {
+      const option = el('option', { value: v }, text);
+      if (String(v) === String(value)) option.selected = true;
+      return option;
+    }));
+  return el('div', { class: 'setting-row' },
+    el('div', {},
+      el('div', { class: 'setting-row__label' }, label),
+      note ? el('div', { class: 'setting-row__note' }, note) : null),
+    select);
+}
+
+function textRow(label, value, placeholder, onChange) {
+  return el('div', { class: 'setting-row' },
+    el('div', { class: 'setting-row__label' }, label),
+    el('input', {
+      type: 'text', value, placeholder, class: 'setting-input',
+      onChange: (e) => onChange(e.target.value.trim()),
+    }));
+}
+
+function sliderRow(label, value, min, max, step, onChange, format) {
+  const readout = el('span', { class: 'setting-row__value' }, format(value));
+  return el('div', { class: 'setting-row' },
+    el('div', { class: 'setting-row__label' }, label),
+    el('div', { class: 'slider' },
+      el('input', {
+        type: 'range', min: String(min), max: String(max), step: String(step), value: String(value),
+        onInput: (e) => {
+          const v = Number(e.target.value);
+          readout.textContent = format(v);
+          onChange(v);
+        },
+      }),
+      readout));
+}
+
+/** Whatever went wrong, said plainly, with the one button that might help. */
+function panelError(err, retry) {
+  const offline = !navigator.onLine || /failed to fetch|networkerror/i.test(err?.message || '');
+  return el('div', { class: 'panel-error' },
+    el('h3', {}, offline ? 'Cannot reach the server' : 'That did not load'),
+    el('p', {}, offline
+      ? 'ECLIPSE is not responding. Check the server is running and this device is on the same network.'
+      : err?.message || 'Something went wrong.'),
+    retry ? el('button', { class: 'btn btn--ghost btn--sm', type: 'button', onClick: () => retry() }, 'Try again') : null);
+}
+
+function debounce(fn, ms) {
+  let timer = null;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), ms);
+  };
+}
+
+function formatUptime(seconds) {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (d) return `${d}d ${h}h`;
+  if (h) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+function formatWhen(value) {
+  if (!value) return '';
+  // SQLite writes UTC without a marker; without the Z this reads hours out.
+  const date = new Date(value.includes('T') ? value : `${value.replace(' ', 'T')}Z`);
+  if (Number.isNaN(date.getTime())) return value;
+  const diff = (Date.now() - date.getTime()) / 1000;
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return date.toLocaleDateString();
+}
+
+/**
+ * The libraries this server scans. The two that come from the environment are
+ * shown as such and can't be edited here — changing them means changing the
+ * .env file, and pretending otherwise would produce an edit that silently
+ * reverts on the next restart.
+ */
+function LibrariesCard(libraries, scanBtn, fullScanBtn, scanInfo) {
+  const list = el('div', { class: 'library-list' });
+
+  const render = (rows) => {
+    clear(list);
+    if (!rows.length) {
+      list.append(el('p', { class: 'setting-note' },
+        'No libraries yet. Add one below, or set ECLIPSE_MOVIES_DIR and ECLIPSE_SERIES_DIR in your .env file.'));
+      return;
+    }
+    for (const library of rows) list.append(LibraryRow(library, reload));
+  };
+
+  const reload = async () => {
+    try {
+      const { libraries: rows } = await api.adminLibraries();
+      render(rows);
+    } catch (err) {
+      clear(list).append(panelError(err, reload));
+    }
+  };
+
+  render(libraries);
+
+  const nameInput = el('input', { type: 'text', class: 'setting-input', placeholder: 'Anime' });
+  const pathInput = el('input', { type: 'text', class: 'setting-input', placeholder: '/mnt/media/Anime' });
+  const kindSelect = el('select', {},
+    el('option', { value: 'movies' }, 'Films'),
+    el('option', { value: 'series' }, 'Series'));
+
+  const addBtn = el('button', {
+    class: 'btn btn--ghost btn--sm', type: 'button',
+    onClick: async () => {
+      try {
+        await api.adminAddLibrary({
+          name: nameInput.value.trim(),
+          kind: kindSelect.value,
+          paths: [pathInput.value.trim()],
+        });
+        nameInput.value = '';
+        pathInput.value = '';
+        toast('Library added — run a scan to pick it up');
+        reload();
+      } catch (err) {
+        toast(err.message);
+      }
+    },
+  }, 'Add library');
+
+  return el('div', { class: 'panel' },
+    el('h2', { class: 'panel__title' }, 'Libraries'),
+    el('p', { class: 'panel__hint' },
+      'Each library is a name, a type, and the folders to look in. Files dropped into them are picked up automatically; a scan catches anything the watcher missed.'),
+    list,
+    el('div', { class: 'library-add' },
+      el('div', { class: 'library-add__fields' }, nameInput, kindSelect, pathInput),
+      addBtn),
+    el('div', { style: { marginTop: '20px' } }, scanBtn, fullScanBtn),
+    scanInfo);
+}
+
+function LibraryRow(library, reload) {
+  const fromConfig = library.source === 'config';
+  return el('div', { class: `library-row${library.enabled ? '' : ' is-off'}` },
+    el('div', { class: 'library-row__main' },
+      el('div', { class: 'library-row__head' },
+        el('span', { class: 'library-row__name' }, library.name),
+        el('span', { class: 'library-row__kind' }, library.kind === 'movies' ? 'Films' : 'Series'),
+        fromConfig ? el('span', { class: 'library-row__badge' }, 'from .env') : null,
+        library.enabled ? null : el('span', { class: 'library-row__badge' }, 'disabled')),
+      el('div', { class: 'library-row__paths' },
+        library.paths.length
+          ? library.paths.map((p) =>
+              el('div', {
+                class: `library-row__path${library.missingPaths.includes(p) ? ' is-missing' : ''}`,
+              }, p, library.missingPaths.includes(p) ? ' — folder not found' : ''))
+          : el('div', { class: 'library-row__path is-missing' }, 'No folders set')),
+      el('div', { class: 'library-row__meta' },
+        [`${library.titles ?? 0} titles`, `${library.files ?? 0} files`,
+          library.bytes ? formatBytes(library.bytes) : null,
+          library.scannedAt ? `scanned ${formatWhen(library.scannedAt)}` : 'never scanned',
+        ].filter(Boolean).join(' · '))),
+    fromConfig
+      ? null
+      : el('div', { class: 'library-row__actions' },
+          el('button', {
+            class: 'btn btn--ghost btn--sm', type: 'button',
+            onClick: async () => {
+              await api.adminUpdateLibrary(library.id, { enabled: !library.enabled });
+              reload();
+            },
+          }, library.enabled ? 'Disable' : 'Enable'),
+          el('button', {
+            class: 'btn btn--ghost btn--sm', type: 'button',
+            onClick: async () => {
+              // Deleting drops the scanned titles, which is worth a sentence
+              // rather than a bare "are you sure".
+              if (!confirm(`Remove "${library.name}"? The ${library.titles ?? 0} titles it scanned are removed from ECLIPSE. Your files are not touched.`)) return;
+              try {
+                await api.adminDeleteLibrary(library.id);
+                toast('Library removed');
+                reload();
+              } catch (err) {
+                toast(err.message);
+              }
+            },
+          }, 'Remove')));
 }

@@ -201,13 +201,18 @@ function containerName(file) {
   return CONTAINER_NAMES[raw] || raw.toUpperCase() || null;
 }
 
+/**
+ * The label people recognise, and the real height when there isn't one.
+ * Rounding a 540-line file up to "576p" would be claiming something about
+ * the file that isn't true.
+ */
 export function qualityLabel(height) {
   if (!height) return null;
   if (height >= 2000) return '4K';
   if (height >= 1400) return '1440p';
   if (height >= 1000) return '1080p';
   if (height >= 700) return '720p';
-  if (height >= 540) return '576p';
+  if (height >= 400) return `${height}p`;
   return 'SD';
 }
 

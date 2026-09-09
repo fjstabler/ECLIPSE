@@ -34,6 +34,19 @@ export async function TitleView({ params, outlet }) {
     },
   }, icon(title.inWatchlist ? 'check' : 'plus'));
 
+  const favouriteBtn = el('button', {
+    class: `btn btn--ghost btn--icon${title.isFavourite ? ' is-on' : ''}`, type: 'button',
+    'aria-label': title.isFavourite ? 'Remove from favourites' : 'Add to favourites',
+    title: 'Favourite',
+    onClick: async () => {
+      const r = await api.toggleFavourite(title.id);
+      title.isFavourite = r.favourite;
+      clear(favouriteBtn).append(icon(r.favourite ? 'heartFilled' : 'heart'));
+      favouriteBtn.classList.toggle('is-on', r.favourite);
+      toast(r.favourite ? 'Added to your favourites' : 'Removed from your favourites');
+    },
+  }, icon(title.isFavourite ? 'heartFilled' : 'heart'));
+
   const rateBtn = (score, iconName, label) =>
     el('button', {
       class: `btn btn--ghost btn--icon${title.userRating === score ? ' is-on' : ''}`,
@@ -86,6 +99,7 @@ export async function TitleView({ params, outlet }) {
               : resume.label)
           : el('button', { class: 'btn btn--play', type: 'button', disabled: true }, icon('play'), 'No playable file'),
         watchlistBtn,
+        favouriteBtn,
         rateBtn(1, 'thumbUp', 'I liked this'),
         rateBtn(-1, 'thumbDown', 'Not for me'),
         el('button', {
@@ -124,7 +138,7 @@ export async function TitleView({ params, outlet }) {
         el('p', { class: 'detail__label' }, 'CAST'),
         el('div', { class: 'people' },
           people.map(({ name, photo }) =>
-            el('div', { class: 'person' },
+            el('a', { class: 'person', href: `#/person/${encodeURIComponent(name)}`, 'aria-label': `Everything with ${name}` },
               el('div', { class: 'person__face' },
                 photo ? el('img', { src: photo, alt: '', loading: 'lazy' }) : initials(name)),
               el('p', { class: 'person__name' }, name)))))
@@ -137,23 +151,17 @@ export async function TitleView({ params, outlet }) {
   if (title.writers?.length) facts.push(['WRITTEN BY', title.writers.join(', ')]);
   if (title.genres?.length) facts.push(['GENRES', title.genres.join(', ')]);
   if (title.studios?.length) facts.push(['STUDIO', title.studios.slice(0, 2).join(', ')]);
+  if (title.countries?.length) facts.push(['COUNTRY', title.countries.join(', ')]);
+  if (title.collection) facts.push(['PART OF', title.collection]);
   if (title.status) facts.push(['STATUS', title.status]);
-
-  // File tech specs (codec/quality) are a footnote for the curious, not a
-  // content credit — kept visually much quieter than director/genre/etc so
-  // it doesn't compete with them for attention.
-  let tech = null;
-  if (title.files?.[0]) {
-    const f = title.files[0];
-    tech = [f.quality, f.videoCodec?.toUpperCase(), f.audioCodec?.toUpperCase()].filter(Boolean).join(' · ') || null;
-  }
 
   const right = el('aside', {},
     el('div', { class: 'factlist' },
       facts.map(([k, v]) => el('div', { class: 'fact' },
         el('div', { class: 'fact__k' }, k),
         el('div', { class: 'fact__v' }, v)))),
-    tech ? el('p', { class: 'fact__tech' }, tech) : null);
+    VersionsBlock(title),
+    TechnicalBlock(title));
 
   const page = el('div', { class: 'page' },
     hero,
@@ -375,4 +383,114 @@ function EditMetadataModal(title) {
   runSearch();
 
   return modal;
+}
+
+/**
+ * Which copies of this film exist. Only shown when there's genuinely a
+ * choice — one file is not a "version", it's just the film.
+ */
+function VersionsBlock(title) {
+  const files = title.files || [];
+  if (files.length < 2) return null;
+
+  return el('div', { class: 'versions' },
+    el('div', { class: 'fact__k' }, 'VERSIONS'),
+    el('div', { class: 'versions__list' },
+      files.map((f) =>
+        el('button', {
+          class: 'version', type: 'button',
+          onClick: () => openPlayer(f.id, f.completed ? 0 : f.position || 0),
+        },
+          el('span', { class: 'version__label' }, f.versionLabel || f.filename),
+          el('span', { class: 'version__meta' },
+            [f.size ? `${(f.size / 1e9).toFixed(1)} GB` : null, f.hdrFormat, f.directPlay ? null : 'needs converting']
+              .filter(Boolean).join(' · '))))));
+}
+
+/**
+ * The technical panel: everything ECLIPSE read out of the file. Folded away
+ * by default — it's for the person who wants to know why something is being
+ * converted, not part of deciding what to watch.
+ */
+function TechnicalBlock(title) {
+  const file = title.files?.[0] || title.seasons?.[0]?.episodes?.[0];
+  if (!file || !file.id) return null;
+
+  const body = el('div', { class: 'technical__body', hidden: true });
+  let loaded = false;
+
+  const toggle = el('button', {
+    class: 'technical__toggle', type: 'button',
+    onClick: async () => {
+      body.hidden = !body.hidden;
+      toggle.classList.toggle('is-open', !body.hidden);
+      if (loaded || body.hidden) return;
+      loaded = true;
+      body.append(el('div', { class: 'skeleton', style: { height: '90px' } }));
+      try {
+        const ctx = await api.playbackContext(file.id);
+        clear(body).append(TechnicalTable(ctx));
+      } catch (err) {
+        clear(body).append(el('p', { class: 'technical__row' }, err.message || 'Could not read this file.'));
+      }
+    },
+  }, 'Technical details');
+
+  return el('div', { class: 'technical' }, toggle, body);
+}
+
+function TechnicalTable(ctx) {
+  const t = ctx.technical;
+  if (!t) return el('p', { class: 'technical__row' }, 'Nothing has been read from this file yet.');
+
+  const rows = [];
+  const push = (k, v) => { if (v) rows.push([k, v]); };
+
+  push('Container', t.container);
+  push('Size', t.size ? `${(t.size / 1e9).toFixed(2)} GB` : null);
+  push('Bitrate', t.bitrate ? `${Math.round(t.bitrate / 1000)} kbps` : null);
+  if (t.video) {
+    push('Video', [t.video.codec?.toUpperCase(), t.video.profile].filter(Boolean).join(' · '));
+    push('Resolution', [t.video.resolution, t.video.quality].filter(Boolean).join(' · '));
+    push('Frame rate', t.video.frameRate ? `${t.video.frameRate} fps` : null);
+    push('Bit depth', t.video.bitDepth ? `${t.video.bitDepth}-bit` : null);
+    push('HDR', t.video.hdrFormat);
+    push('Colour', [t.video.colorSpace, t.video.colorTransfer].filter(Boolean).join(' · '));
+    push('Aspect', t.video.aspectRatio);
+  }
+
+  const table = el('div', { class: 'technical__table' },
+    rows.map(([k, v]) => el('div', { class: 'technical__row' },
+      el('span', { class: 'technical__k' }, k),
+      el('span', { class: 'technical__v' }, v))));
+
+  const streams = el('div', {});
+  if (t.audio?.length) {
+    streams.append(
+      el('div', { class: 'technical__k technical__group' }, `Audio (${t.audio.length})`),
+      ...t.audio.map((a) => el('div', { class: 'technical__stream' },
+        [a.languageName || a.label, a.codec?.toUpperCase(), a.channelLabel,
+          a.bitrate ? `${Math.round(a.bitrate / 1000)} kbps` : null,
+          a.isCommentary ? 'commentary' : null, a.isDefault ? 'default' : null,
+        ].filter(Boolean).join(' · '))));
+  }
+  if (t.subtitles?.length) {
+    streams.append(
+      el('div', { class: 'technical__k technical__group' }, `Subtitles (${t.subtitles.length})`),
+      ...t.subtitles.map((s) => el('div', { class: 'technical__stream' },
+        [s.languageName || s.label, s.format, s.isForced ? 'forced' : null,
+          s.isHearingImpaired ? 'SDH' : null, s.isDefault ? 'default' : null,
+        ].filter(Boolean).join(' · '))));
+  }
+  if (ctx.chapters?.length) {
+    streams.append(el('div', { class: 'technical__k technical__group' }, `Chapters (${ctx.chapters.length})`));
+  }
+
+  // The file's own path, last — useful when a title is wrong and you need to
+  // go and look at what it actually matched.
+  const path = t.path
+    ? el('div', { class: 'technical__path' }, t.path)
+    : null;
+
+  return el('div', {}, table, streams, path);
 }

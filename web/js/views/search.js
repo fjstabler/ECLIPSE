@@ -1,4 +1,4 @@
-import { el, icon, clear } from '../ui.js';
+import { el, icon, clear, initials } from '../ui.js';
 import { api } from '../api.js';
 import { Card } from '../components/card.js';
 
@@ -12,8 +12,6 @@ export function openSearch() {
   }
 
   const results = el('div', { class: 'searchbar__body' });
-  const grid = el('div', { class: 'grid' });
-  results.append(grid);
 
   let timer = null;
   let lastQuery = '';
@@ -37,22 +35,78 @@ export function openSearch() {
     lastQuery = q;
 
     if (q.length < 2) {
-      clear(grid);
-      results.append(hint());
+      clear(results).append(hint());
       return;
     }
-    const hintNode = results.querySelector('.empty');
-    if (hintNode) hintNode.remove();
 
-    const { items } = await api.search(q);
-    clear(grid);
-    if (!items.length) {
-      grid.append(el('div', { class: 'empty', style: { gridColumn: '1 / -1' } },
+    let data;
+    try {
+      data = await api.search(q);
+    } catch (err) {
+      clear(results).append(el('div', { class: 'empty' },
+        el('h2', {}, 'Search is not responding'),
+        el('p', {}, err.message || 'The server did not answer. Check it is still running.')));
+      return;
+    }
+    // A slower earlier request must not overwrite a newer one's results.
+    if (q !== lastQuery) return;
+
+    const { items = [], people = [], episodes = [], tags = [] } = data;
+    clear(results);
+
+    if (!items.length && !people.length && !episodes.length && !tags.length) {
+      results.append(el('div', { class: 'empty' },
         el('h2', {}, `Nothing on this server matches "${q}"`),
         el('p', {}, 'Try a different spelling, or ask N.O.V.A. — it can search by mood as well as by name.')));
       return;
     }
-    for (const item of items) grid.append(Card(item));
+
+    // People and tags first: they're navigation, and they're what turns a
+    // search into a way of browsing sideways.
+    if (people.length) {
+      results.append(section('People',
+        el('div', { class: 'search-people' },
+          people.map((p) =>
+            el('a', { class: 'search-person', href: `#/person/${encodeURIComponent(p.name)}` },
+              el('div', { class: 'search-person__face' },
+                p.image ? el('img', { src: p.image, alt: '' }) : el('span', {}, initials(p.name))),
+              el('div', {},
+                el('div', { class: 'search-person__name' }, p.name),
+                el('div', { class: 'search-person__meta' },
+                  `${roleLabel(p.role)} · ${p.count} title${p.count === 1 ? '' : 's'}`)))))));
+    }
+
+    if (tags.length) {
+      results.append(section('Genres and collections',
+        el('div', { class: 'pill-choice' },
+          tags.map((t) =>
+            el('a', {
+              class: 'search-tag',
+              href: t.type === 'genre' ? `#/browse?genre=${encodeURIComponent(t.value)}` : '#/',
+            }, t.value, el('span', { class: 'search-tag__count' }, String(t.count)))))));
+    }
+
+    if (items.length) {
+      results.append(section('Titles', el('div', { class: 'grid' }, items.map((item) => Card(item)))));
+    }
+
+    if (episodes.length) {
+      results.append(section('Episodes',
+        el('div', { class: 'search-episodes' },
+          episodes.map((e) =>
+            el('a', { class: 'search-episode', href: `#/title/${e.titleId}` },
+              e.still
+                ? el('img', { class: 'search-episode__still', src: e.still, alt: '', loading: 'lazy' })
+                : el('div', { class: 'search-episode__still' }),
+              el('div', {},
+                el('div', { class: 'search-episode__name' }, e.name),
+                el('div', { class: 'search-episode__meta' }, `${e.series} · S${e.season} E${e.number}`)))))));
+    }
+  }
+
+  function section(title, body) {
+    return el('section', { class: 'search-section' },
+      el('h2', { class: 'search-section__title' }, title), body);
   }
 
   overlay = el('div', { class: 'searchbar' },
@@ -69,13 +123,17 @@ export function openSearch() {
 
   // Clicking a result navigates, so close the overlay behind it.
   overlay.addEventListener('click', (e) => {
-    if (e.target.closest('.card')) setTimeout(closeSearch, 60);
+    if (e.target.closest('.card, .search-person, .search-episode, .search-tag')) setTimeout(closeSearch, 60);
   });
 }
 
 function hint() {
   return el('div', { class: 'empty' },
-    el('p', {}, 'Search by title, cast or director. Press Esc to close.'));
+    el('p', {}, 'Search by title, episode, cast, director, genre or collection. Press Esc to close.'));
+}
+
+function roleLabel(role) {
+  return { cast: 'Actor', director: 'Director', creator: 'Creator', writer: 'Writer' }[role] || role;
 }
 
 export function closeSearch() {

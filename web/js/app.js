@@ -5,6 +5,7 @@ import { defineRoute, setOutlet, render, navigate, currentPath } from './router.
 import { HomeView } from './views/home.js';
 import { TitleView } from './views/title.js';
 import { BrowseView } from './views/browse.js';
+import { PersonView } from './views/person.js';
 import { SettingsView } from './views/settings.js';
 import { AuthView } from './views/auth.js';
 import { openSearch, closeSearch, isSearchOpen } from './views/search.js';
@@ -59,6 +60,7 @@ function mountShell() {
     defineRoute('/my-list', BrowseView);
     defineRoute('/browse', BrowseView);
     defineRoute('/title/:id', TitleView);
+    defineRoute('/person/:name', PersonView);
     defineRoute('/settings', SettingsView);
 
     bindGlobalKeys();

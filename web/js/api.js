@@ -118,6 +118,21 @@ export const api = {
   adminEditTitle: (id, body) => request('PATCH', `/api/admin/titles/${id}`, body),
   adminUsers: () => request('GET', '/api/admin/users'),
   adminDeleteUser: (id) => request('DELETE', `/api/admin/users/${id}`),
+  adminLibraries: () => request('GET', '/api/admin/libraries'),
+  adminAddLibrary: (body) => request('POST', '/api/admin/libraries', body),
+  adminUpdateLibrary: (id, body) => request('PATCH', `/api/admin/libraries/${id}`, body),
+  adminDeleteLibrary: (id) => request('DELETE', `/api/admin/libraries/${id}`),
+  adminSessions: () => request('GET', '/api/admin/sessions'),
+  adminStopSession: (id) => request('DELETE', `/api/admin/sessions/${id}`),
+  adminLogs: (level) => request('GET', `/api/admin/logs${level ? `?level=${level}` : ''}`),
+  adminRenameDevice: (id, name) => request('PATCH', `/api/admin/devices/${id}`, { name }),
+  adminDeleteDevice: (id) => request('DELETE', `/api/admin/devices/${id}`),
+
+  // library extras
+  favourites: () => request('GET', '/api/library/favourites'),
+  toggleFavourite: (id) => request('POST', `/api/library/titles/${id}/favourite`),
+  libraries: () => request('GET', '/api/library/libraries'),
+  person: (name) => request('GET', `/api/library/people/${encodeURIComponent(name)}`),
 };
 
 /**
