@@ -1,4 +1,4 @@
-import { el, icon, clear, formatRuntime, formatTime, initials, toast } from '../ui.js';
+import { el, icon, clear, formatRuntime, formatTime, formatBytes, initials, toast } from '../ui.js';
 import { api } from '../api.js';
 import { state } from '../state.js';
 import { Row } from '../components/row.js';
@@ -393,18 +393,26 @@ function VersionsBlock(title) {
   const files = title.files || [];
   if (files.length < 2) return null;
 
+  // Play uses one of these, and which one is not obvious from a list of
+  // equals — so the one it would pick says so.
+  const primaryId = title.primaryFile?.id;
+
   return el('div', { class: 'versions' },
     el('div', { class: 'fact__k' }, 'VERSIONS'),
     el('div', { class: 'versions__list' },
       files.map((f) =>
         el('button', {
-          class: 'version', type: 'button',
+          class: `version${f.id === primaryId ? ' is-current' : ''}`, type: 'button',
           onClick: () => openPlayer(f.id, f.completed ? 0 : f.position || 0),
         },
           el('span', { class: 'version__label' }, f.versionLabel || f.filename),
           el('span', { class: 'version__meta' },
-            [f.size ? `${(f.size / 1e9).toFixed(1)} GB` : null, f.hdrFormat, f.directPlay ? null : 'needs converting']
-              .filter(Boolean).join(' · '))))));
+            [
+              f.id === primaryId ? 'Plays by default' : null,
+              f.size ? formatBytes(f.size) : null,
+              f.hdrFormat,
+              f.directPlay ? null : 'needs converting',
+            ].filter(Boolean).join(' · '))))));
 }
 
 /**
@@ -447,7 +455,7 @@ function TechnicalTable(ctx) {
   const push = (k, v) => { if (v) rows.push([k, v]); };
 
   push('Container', t.container);
-  push('Size', t.size ? `${(t.size / 1e9).toFixed(2)} GB` : null);
+  push('Size', t.size ? formatBytes(t.size) : null);
   push('Bitrate', t.bitrate ? `${Math.round(t.bitrate / 1000)} kbps` : null);
   if (t.video) {
     push('Video', [t.video.codec?.toUpperCase(), t.video.profile].filter(Boolean).join(' · '));

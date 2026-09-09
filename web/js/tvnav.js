@@ -104,6 +104,18 @@ function candidates() {
  * overlay, so the menu/modal reads as already-focused rather than waiting
  * for a first arrow press to land somewhere. Desktop-only overlays (opened
  * by mouse) are untouched unless this is actually called. */
+/**
+ * Put the cursor on one specific element.
+ *
+ * focusFirstIn() takes the first thing in a container, which is right when
+ * arriving somewhere new and wrong when coming back: closing a menu should
+ * return the cursor to the button that opened it, not to whatever happens to
+ * sit leftmost in the same row.
+ */
+export function focusElement(el) {
+  if (el?.isConnected) setCursor(el);
+}
+
 export function focusFirstIn(container) {
   const items = Array.from(container.querySelectorAll(FOCUSABLE)).filter(isVisible);
   if (items.length) setCursor(groupIntoRows(items)[0]?.items[0]?.el || items[0]);

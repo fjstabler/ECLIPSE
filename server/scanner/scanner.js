@@ -256,17 +256,17 @@ async function lookupSeason(tmdbId, seasonNumber) {
 
 const getFileByPath = db.prepare('SELECT * FROM media_files WHERE path = ?');
 
-async function ingestMovie(filePath, stat, libraryId = null) {
+async function ingestMovie(filePath, stat, libraryId = null, probed = null) {
   const parsed = parseMovie(filePath);
   const meta = await lookupMovie(parsed.title, parsed.year);
   const existingTitleId = getFileByPath.get(filePath)?.title_id || null;
   const { id: titleId, manual } = upsertTitle({ kind: 'movie', title: parsed.title, year: parsed.year, meta, existingTitleId });
   if (meta?.tags && !manual) await replaceTags(titleId, meta.tags);
-  await attachFile({ filePath, stat, titleId, episodeId: null, libraryId });
+  await attachFile({ filePath, stat, titleId, episodeId: null, libraryId, probed });
   return titleId;
 }
 
-async function ingestEpisode(filePath, stat, libraryRoot, libraryId = null) {
+async function ingestEpisode(filePath, stat, libraryRoot, libraryId = null, probed = null) {
   const parsed = parseEpisode(filePath, libraryRoot);
   if (!parsed) return null;
 
@@ -324,11 +324,11 @@ async function ingestEpisode(filePath, stat, libraryRoot, libraryId = null) {
     .prepare('SELECT id FROM episodes WHERE title_id = ? AND season = ? AND number = ?')
     .get(titleId, parsed.season, parsed.episode);
 
-  await attachFile({ filePath, stat, titleId, episodeId: episodeRow.id, libraryId });
+  await attachFile({ filePath, stat, titleId, episodeId: episodeRow.id, libraryId, probed });
   return titleId;
 }
 
-async function attachFile({ filePath, stat, titleId, episodeId, libraryId = null }) {
+async function attachFile({ filePath, stat, titleId, episodeId, libraryId = null, probed: alreadyProbed = null }) {
   const ext = path.extname(filePath).toLowerCase();
   const existing = getFileByPath.get(filePath);
 
@@ -338,7 +338,7 @@ async function attachFile({ filePath, stat, titleId, episodeId, libraryId = null
   // an upgrade backfill the whole library on its next scan by itself.
   const unchanged = existing && existing.size === stat.size && existing.mtime === Math.floor(stat.mtimeMs);
   const staleProbe = !existing || (existing.probe_version ?? 0) < PROBE_VERSION;
-  const probed = unchanged && !staleProbe ? null : await probeFile(filePath);
+  const probed = alreadyProbed ?? (unchanged && !staleProbe ? null : await probeFile(filePath));
 
   const row = {
     title_id: titleId,
@@ -578,17 +578,28 @@ export async function runScan({ full = false } = {}) {
           continue;
         }
 
+        // A scan can run while something is still being copied in. Leave that
+        // file alone rather than recording a title with nothing readable
+        // behind it — but count it as seen, so the sweep below doesn't decide
+        // it has been deleted.
+        const probed = await readIfReady(item.file, stat);
+        if (!probed) {
+          console.log(`[scan] skipping ${path.basename(item.file)} — still being written`);
+          seen.add(item.file);
+          continue;
+        }
+
         if (item.kind === 'series') {
-          const id = await ingestEpisode(item.file, stat, item.root, item.libraryId);
+          const id = await ingestEpisode(item.file, stat, item.root, item.libraryId, probed);
           if (!id) {
             // No episode markers — treat it as a film sitting in the series folder.
-            await ingestMovie(item.file, stat, item.libraryId);
+            await ingestMovie(item.file, stat, item.libraryId, probed);
           }
         } else {
           // A film library can still contain an obviously-episodic file.
           const ep = parseEpisode(item.file, item.root);
-          if (ep) await ingestEpisode(item.file, stat, item.root, item.libraryId);
-          else await ingestMovie(item.file, stat, item.libraryId);
+          if (ep) await ingestEpisode(item.file, stat, item.root, item.libraryId, probed);
+          else await ingestMovie(item.file, stat, item.libraryId, probed);
         }
 
         seen.add(item.file);
@@ -643,11 +654,59 @@ export async function runScan({ full = false } = {}) {
   }
 }
 
+/**
+ * Whether a file on disk is finished enough to be worth reading.
+ *
+ * The folder watcher waits for a file to stop growing before it reports it,
+ * but "stopped growing" and "finished" are not the same thing: a writer that
+ * creates the file and then pauses — ffmpeg opening its output before it has
+ * encoded anything, a download client preallocating, a copy over a stalled
+ * network share — looks perfectly stable at zero bytes. Ingesting that stores
+ * a title with no duration, no codec and no size, which shows up on the home
+ * screen and fails to play.
+ *
+ * So the file has to prove itself: it must have bytes, and ffprobe must find
+ * something playable in it. Anything else is not rejected, just not ready —
+ * the watcher will be told again when it grows.
+ */
+export async function readIfReady(filePath, stat, { settled = false } = {}) {
+  if (!stat.size) return null;
+  const probed = await probeFile(filePath);
+  if (!probed || !probed.videoCodec) return null;
+
+  // A container states its length once it has been finalised, so a duration is
+  // the clearest signal that a writer has finished. Half of an encode reports
+  // its codec and dimensions quite happily and no duration at all — which is
+  // how a 20-second film ends up in the library as a 256 KB fragment.
+  if (probed.duration) return probed;
+
+  // Not every container carries one — a stream capture may never state its
+  // length — so a file whose size has stopped moving is accepted anyway
+  // rather than being kept out of the library forever.
+  return settled ? probed : null;
+}
+
+function notReady() {
+  const err = new Error('not finished being written');
+  err.code = 'ENOTREADY';
+  return err;
+}
+
 /** Ingest a single file — used by the folder watcher. */
-export async function ingestPath(filePath) {
+export async function ingestPath(filePath, { settled = false } = {}) {
   const ext = path.extname(filePath).toLowerCase();
   if (!VIDEO_EXTENSIONS.has(ext)) return null;
   const stat = await fsp.stat(filePath);
+
+  // A file still being written has nothing to read yet. Committing a row for
+  // it would put a broken entry in the library that nothing ever revisits.
+  // The probe is carried through so the file is only read once.
+  const probed = await readIfReady(filePath, stat, { settled });
+  if (!probed) {
+    const err = notReady();
+    err.size = stat.size;
+    throw err;
+  }
 
   // Which library this file appeared in decides how it's read. The longest
   // matching root wins, so a series library nested inside a films folder
@@ -660,12 +719,12 @@ export async function ingestPath(filePath) {
   const libraryId = target?.libraryId ?? null;
 
   if (target?.kind === 'series') {
-    const id = await ingestEpisode(filePath, stat, root, libraryId);
+    const id = await ingestEpisode(filePath, stat, root, libraryId, probed);
     if (id) return id;
   }
   const ep = parseEpisode(filePath, root);
-  if (ep) return ingestEpisode(filePath, stat, root, libraryId);
-  return ingestMovie(filePath, stat, libraryId);
+  if (ep) return ingestEpisode(filePath, stat, root, libraryId, probed);
+  return ingestMovie(filePath, stat, libraryId, probed);
 }
 
 export function removePath(filePath) {

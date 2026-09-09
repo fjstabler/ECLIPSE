@@ -212,7 +212,9 @@ export function qualityLabel(height) {
   if (height >= 1400) return '1440p';
   if (height >= 1000) return '1080p';
   if (height >= 700) return '720p';
-  if (height >= 400) return `${height}p`;
+  // 360p and 480p are labels people read off a file and recognise; collapsing
+  // them into "SD" throws away the one thing that tells two versions apart.
+  if (height >= 240) return `${height}p`;
   return 'SD';
 }
 

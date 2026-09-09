@@ -1,6 +1,6 @@
-import { el, icon, clear, formatTime, toast } from '../ui.js';
+import { el, icon, clear, formatTime, formatBytes, toast } from '../ui.js';
 import { api } from '../api.js';
-import { focusFirstIn } from '../tvnav.js';
+import { focusFirstIn, focusElement } from '../tvnav.js';
 import { parseVtt, SubtitleLayer } from './subtitles.js';
 
 // Set once, synchronously, before this module (or any other) ever runs —
@@ -52,6 +52,10 @@ class Player {
     this.lastTick = 0;
     this.dismissedMarkers = new Set();
     this.destroyed = false;
+
+    // Where the cursor was when the player opened, so closing can put it back
+    // on the thing that was pressed rather than at the top of the page.
+    this.openedFrom = TV_MODE ? document.querySelector('.tv-cursor') : null;
 
     this.root = el('div', { class: 'player' });
     document.body.append(this.root);
@@ -270,6 +274,14 @@ class Player {
 
     this.bindIdle();
     this.nextEpisode = next;
+
+    // The player covers the page it was opened from, so the cursor has to come
+    // with it. Left behind, it sits on a button nobody can see any more:
+    // arrow presses walk around a hidden page, the controls in front of the
+    // viewer never light up, and there is no way back without the remote's
+    // Back button. Bring it to the play button, which is where a viewer
+    // reaching for the remote expects to already be.
+    if (TV_MODE) focusFirstIn(this.ui.querySelector('.player__controls'));
   }
 
   /** Chapter boundaries drawn onto the scrub bar, so they can be aimed at. */
@@ -690,12 +702,21 @@ class Player {
     const versions = this.ctx.versions || [];
     const items = versions.map((v) => ({
       label: v.versionLabel || v.filename,
-      hint: v.size ? `${(v.size / 1e9).toFixed(1)} GB` : '',
+      hint: v.size ? formatBytes(v.size) : '',
     }));
     this.openMenu('version', anchor, items, versions.findIndex((v) => v.id === this.fileId), (i) => {
       const chosen = versions[i];
       if (chosen.id === this.fileId) return;
-      const at = this.currentTime;
+
+      // Two versions of the same film are not always the same length — an
+      // extended cut against a theatrical one, a PAL transfer against an NTSC
+      // one. Carrying the position across unclamped starts the new file past
+      // its own end, which reads as the player closing itself the instant you
+      // pick a version.
+      let at = this.currentTime;
+      if (chosen.duration && at > chosen.duration - 10) {
+        at = Math.max(0, chosen.duration - 10);
+      }
       closePlayer();
       openPlayer(chosen.id, at);
     });
@@ -711,7 +732,7 @@ class Player {
       ['Audio', t.audio?.map((a) => [a.languageName || a.label, a.codec?.toUpperCase(), a.channelLabel].filter(Boolean).join(' ')).join(', ')],
       ['Subtitles', t.subtitles?.length ? t.subtitles.map((s) => `${s.languageName || s.label} (${s.format})`).join(', ') : 'None'],
       ['Playing via', this.mode === 'direct' ? 'Direct play' : this.forceFullEncode ? 'Transcoding' : 'Remuxing'],
-      ['Size', t.size ? `${(t.size / 1e9).toFixed(2)} GB` : null],
+      ['Size', t.size ? formatBytes(t.size) : null],
     ].filter(([, v]) => v);
 
     this.openMenu(
@@ -754,6 +775,10 @@ class Player {
 
     document.body.append(menu);
     this.trackMenu = menu;
+    // Remembered so closing the menu can put the cursor back where it came
+    // from. On a remote there is nowhere else for it to go: the menu is gone,
+    // and a cursor that was inside it goes with it.
+    this.menuAnchor = anchor;
     // On a remote there's no hover or first-arrow-press to reveal where the
     // cursor is — land it on the current item immediately so the menu reads
     // as already-focused, not blank until the first D-pad press.
@@ -771,11 +796,19 @@ class Player {
 
   closeTrackMenu() {
     if (!this.trackMenu) return;
+    const heldCursor = Boolean(this.trackMenu.querySelector('.tv-cursor'));
     this.trackMenu.remove();
     this.trackMenu = null;
     this.menuFor = null;
     if (this.menuOutsideHandler) { document.removeEventListener('click', this.menuOutsideHandler); this.menuOutsideHandler = null; }
     if (this.menuKeyHandler) { document.removeEventListener('keydown', this.menuKeyHandler); this.menuKeyHandler = null; }
+
+    // The cursor was in the list that just disappeared. Hand it back to the
+    // button that opened it, rather than leaving the screen with nothing
+    // focused and the next D-pad press landing somewhere unpredictable.
+    const anchor = this.menuAnchor;
+    this.menuAnchor = null;
+    if (heldCursor && TV_MODE) focusElement(anchor);
   }
 
   // --- what comes next --------------------------------------------------
@@ -839,6 +872,11 @@ class Player {
       this.root.classList.remove('is-idle');
       clearTimeout(this.idleTimer);
       this.idleTimer = setTimeout(() => {
+        // A menu is a deliberate interaction: reading down a list of audio
+        // tracks takes longer than three seconds, and hiding the controls
+        // underneath it — along with the mouse pointer — while the viewer is
+        // still choosing is a way of punishing them for deciding slowly.
+        if (this.trackMenu) return reset();
         if (!this.video.paused) this.root.classList.add('is-idle');
       }, 3000);
     };
@@ -956,6 +994,11 @@ class Player {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     this.root.remove();
     document.body.classList.remove('is-locked');
+
+    // Hand the cursor back to whatever opened the player. Without this the
+    // page behind is left with nothing focused, and the next press has to
+    // guess where to start.
+    if (TV_MODE) focusElement(this.openedFrom);
   }
 }
 
