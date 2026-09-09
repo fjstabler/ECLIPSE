@@ -127,6 +127,8 @@ export const api = {
   adminSessions: () => request('GET', '/api/admin/sessions'),
   adminStopSession: (id) => request('DELETE', `/api/admin/sessions/${id}`),
   adminLogs: (level) => request('GET', `/api/admin/logs${level ? `?level=${level}` : ''}`),
+  adminMergeCandidates: (id) => request('GET', `/api/admin/titles/${id}/merge-candidates`),
+  adminMergeTitles: (id, sourceIds) => request('POST', `/api/admin/titles/${id}/merge`, { sourceIds }),
   adminBackups: () => request('GET', '/api/admin/backups'),
   adminCreateBackup: () => request('POST', '/api/admin/backups'),
   adminBackupUrl: (name) => `/api/admin/backups/${encodeURIComponent(name)}`,

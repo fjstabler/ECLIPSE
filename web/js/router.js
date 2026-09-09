@@ -1,6 +1,6 @@
 /** Hash router. No build step, no history-API server config to get wrong. */
 
-import { cancelScrollAnimation } from './tvnav.js';
+import { cancelScrollAnimation, ensureCursor } from './tvnav.js';
 
 const routes = [];
 let outlet = null;
@@ -71,6 +71,9 @@ export async function render() {
     // fight this for a frame or two, since it keeps calling scrollTo itself.
     cancelScrollAnimation();
     window.scrollTo({ top: 0, behavior: 'instant' });
+    // The view that just rendered replaced whatever the cursor was on. This
+    // is a no-op when focus is still somewhere real.
+    ensureCursor();
     return;
   }
 

@@ -417,6 +417,59 @@ function EditMetadataModal(title) {
     },
   }, 'Save changes');
 
+  // --- merging pieces of a split title back together ---
+  // A season folder the scanner didn't recognise as one becomes its own
+  // title, and a rescan won't undo that: a file deliberately stays attached
+  // to the title it already has, so an edited title can't drift. Merging is
+  // the only way back, which is why it lives here rather than nowhere.
+  const mergeBox = el('div', { class: 'modal__results' });
+  const chosen = new Set();
+
+  const mergeBtn = el('button', {
+    class: 'btn btn--ghost btn--sm', type: 'button', hidden: true,
+    onClick: async () => {
+      if (!chosen.size) return;
+      mergeBtn.disabled = true;
+      try {
+        const r = await api.adminMergeTitles(title.id, [...chosen]);
+        toast(`Merged ${r.merged} into this title — ${r.episodes} episode${r.episodes === 1 ? '' : 's'}, ${r.files} file${r.files === 1 ? '' : 's'}`);
+        close();
+        navigate(`/title/${title.id}`);
+      } catch (err) {
+        toast(err.message || 'Could not merge those');
+        mergeBtn.disabled = false;
+      }
+    },
+  }, 'Merge selected into this title');
+
+  api.adminMergeCandidates(title.id)
+    .then(({ candidates }) => {
+      if (!candidates.length) {
+        mergeBox.append(el('p', { class: 'modal__hint', style: { margin: 0 } },
+          'Nothing on this server looks like another piece of this title.'));
+        return;
+      }
+      // Spread, not an array: append() on a real DOM node stringifies an
+      // array argument into "[object HTMLButtonElement]" rather than adding
+      // its members. el() flattens its children; append() does not.
+      clear(mergeBox).append(...candidates.map((c) =>
+        el('button', {
+          class: 'merge-option', type: 'button',
+          onClick: (e) => {
+            const on = chosen.has(c.id);
+            if (on) chosen.delete(c.id); else chosen.add(c.id);
+            e.currentTarget.classList.toggle('is-on', !on);
+            mergeBtn.hidden = chosen.size === 0;
+          },
+        },
+          el('span', {}, c.title, c.year ? ` (${c.year})` : ''),
+          el('span', { class: 'merge-option__meta' },
+            c.episodes ? `${c.episodes} episode${c.episodes === 1 ? '' : 's'}` : `${c.files} file${c.files === 1 ? '' : 's'}`))));
+    })
+    .catch(() => {
+      mergeBox.append(el('p', { class: 'modal__hint', style: { margin: 0 } }, 'Could not look for related titles.'));
+    });
+
   const modal = el(
     'div',
     { class: 'modal', onClick: (e) => { if (e.target === modal) close(); } },
@@ -442,6 +495,13 @@ function EditMetadataModal(title) {
       field('Synopsis', overviewInput),
       field('Poster URL', posterInput),
       field('Backdrop URL', backdropInput),
+
+      el('hr', { class: 'modal__divider' }),
+      el('p', { class: 'modal__hint' },
+        'If one series was scanned as several — a season folder the scanner read as a show of its own — pick the other pieces and fold them in. ',
+        'Their episodes, files and everything anyone has watched move across; the empty titles go. Rename the result above afterwards.'),
+      mergeBox,
+      mergeBtn,
 
       el('div', { class: 'modal__actions' },
         el('button', { class: 'btn btn--ghost', type: 'button', onClick: close }, 'Cancel'),

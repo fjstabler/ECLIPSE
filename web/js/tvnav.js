@@ -366,6 +366,18 @@ function scrollableAncestor(el) {
   return null;
 }
 
+/**
+ * Make sure something is focused, without moving the cursor if it already is.
+ *
+ * The router calls this after every render. Navigating to the page you are
+ * already on re-renders in place and fires no hashchange, so the outlet's
+ * children — the cursor among them — are replaced with nothing to notice it:
+ * saving an edit or merging a title left a TV with no focus at all.
+ */
+export function ensureCursor() {
+  focusFirstIfNeeded();
+}
+
 function focusFirstIfNeeded() {
   requestAnimationFrame(() => {
     if (cursor && document.contains(cursor) && isVisible(cursor)) return;

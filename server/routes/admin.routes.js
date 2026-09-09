@@ -11,6 +11,7 @@ import { sortTitle } from '../util/parse.js';
 import { cacheImage } from '../metadata/artwork.js';
 import { listLibraries, createLibrary, updateLibrary, deleteLibrary } from '../libraries.js';
 import { createBackup, listBackups, backupPath } from '../backup.js';
+import { mergeCandidates, mergeTitles } from '../merge.js';
 import { activeSessions, listDevices, endSession, transcodeCount } from '../media/sessions.js';
 import { detectHardware } from '../media/transcode.js';
 import { recentLogs, logCounts, log } from '../log.js';
@@ -299,4 +300,21 @@ router.get('/backups/:name', (req, res) => {
   const file = backupPath(req.params.name);
   if (!file) return res.status(404).json({ error: 'No backup by that name' });
   res.download(file);
+});
+
+// --- merging split titles ---------------------------------------------------
+
+/** Titles that might be pieces of the one being viewed. */
+router.get('/titles/:id/merge-candidates', (req, res) => {
+  res.json({ candidates: mergeCandidates(Number(req.params.id)) });
+});
+
+/** Fold the given titles into this one. */
+router.post('/titles/:id/merge', (req, res) => {
+  const sourceIds = Array.isArray(req.body?.sourceIds) ? req.body.sourceIds : [];
+  try {
+    res.json(mergeTitles(Number(req.params.id), sourceIds));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
 });
