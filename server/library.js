@@ -312,6 +312,92 @@ export function continueWatching(userId, limit = 20) {
   }));
 }
 
+/**
+ * The next episode of every series someone is partway through.
+ *
+ * Continue watching only knows about a file left half-finished. Finish an
+ * episode cleanly and the series vanishes: the viewer is expected to
+ * remember which show they were on, navigate to it, pick the right season
+ * and count down to the next episode by hand. This is the row that answers
+ * "what do I put on now", and on a sofa with a remote it is the difference
+ * between one button and a dozen.
+ *
+ * A series appears here only when it has actually been started and there is
+ * a real file for the next episode. Specials (season 0) are skipped when
+ * choosing what comes next — they sit outside the running order and are not
+ * what "next" means to anyone watching a series through.
+ */
+export function nextUp(userId, limit = 20) {
+  // The furthest point reached in each series, by the order episodes are
+  // watched in rather than by when the rows happened to be written.
+  const furthest = db
+    .prepare(`
+      SELECT ps.title_id,
+             MAX(ps.updated_at) AS watched_at,
+             MAX(e.season * 1000 + e.number) AS reached
+      FROM playback_state ps
+      JOIN media_files f ON f.id = ps.media_file_id
+      JOIN episodes e ON e.id = f.episode_id
+      JOIN titles t ON t.id = ps.title_id
+      WHERE ps.user_id = ? AND t.kind = 'series' AND e.season > 0
+      GROUP BY ps.title_id
+      ORDER BY watched_at DESC
+    `)
+    .all(userId);
+
+  const nextEpisode = db.prepare(`
+    SELECT e.id AS episode_id, e.season, e.number, e.name AS episode_name, e.runtime,
+           f.id AS file_id, f.duration,
+           ${TITLE_COLUMNS}
+    FROM episodes e
+    JOIN media_files f ON f.episode_id = e.id
+    JOIN titles t ON t.id = e.title_id
+    LEFT JOIN playback_state ps ON ps.media_file_id = f.id AND ps.user_id = ?
+    WHERE e.title_id = ? AND e.season > 0 AND (e.season * 1000 + e.number) > ?
+      AND COALESCE(ps.completed, 0) = 0
+    ORDER BY e.season, e.number
+    LIMIT 1
+  `);
+
+  const out = [];
+  for (const series of furthest) {
+    if (out.length >= limit) break;
+    const row = nextEpisode.get(userId, series.title_id, series.reached);
+    if (!row) continue;
+
+    // Anywhere in this series left half-watched means the series belongs to
+    // Continue watching, not here. Someone three minutes into episode two
+    // is not looking for episode three — episode two is what's next for
+    // them, and Continue watching is already offering it.
+    const partway = db
+      .prepare(`
+        SELECT 1 FROM playback_state ps
+        JOIN media_files f ON f.id = ps.media_file_id
+        JOIN episodes e ON e.id = f.episode_id
+        WHERE ps.user_id = ? AND e.title_id = ? AND ps.completed = 0 AND ps.position > 60
+        LIMIT 1
+      `)
+      .get(userId, series.title_id);
+    if (partway) continue;
+
+    out.push({
+      ...decorate(row),
+      id: row.id,
+      resume: {
+        fileId: row.file_id,
+        position: 0,
+        duration: row.duration,
+        season: row.season,
+        episode: row.number,
+        episodeName: row.episode_name,
+        label: `Play S${row.season} E${row.number}`,
+        progress: 0,
+      },
+    });
+  }
+  return out;
+}
+
 export function getFavourites(userId, limit = 50) {
   const rows = db
     .prepare(`

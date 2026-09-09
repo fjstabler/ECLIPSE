@@ -65,6 +65,11 @@ export const config = {
     // Wait for a file to stop growing before scanning it (copies in progress).
     stabilityMs: Number(process.env.ECLIPSE_STABILITY_MS || 4000),
     scanOnBoot: process.env.ECLIPSE_SCAN_ON_BOOT !== 'false',
+    // A periodic sweep, because the folder watcher is not enough on its own:
+    // inotify does not cross a network mount, so a library on a NAS — which
+    // is most of them — never reports a new file at all. Hours; 0 turns it
+    // off for anyone whose media really is on local disk.
+    intervalHours: Number(process.env.ECLIPSE_SCAN_INTERVAL_HOURS ?? 6),
   },
 
   // Transcoding is optional. If ffmpeg is on PATH, ECLIPSE can remux containers

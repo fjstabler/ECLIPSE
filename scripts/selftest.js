@@ -145,6 +145,77 @@ if (titleCount === 0) {
 
 db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
 
+// --- next up ------------------------------------------------------------
+// "What comes after the episode I just finished" is the row a series library
+// is actually used through, and it is easy to get subtly wrong: offering an
+// episode already in progress twice, offering one with no file behind it, or
+// carrying on offering a series that has been finished.
+
+console.log('\nnext up');
+{
+  const { nextUp, continueWatching } = await import('../server/library.js');
+  const { db: sdb } = await import('../server/db.js');
+
+  const episodeFile = sdb
+    .prepare(`
+      SELECT f.id AS file_id, e.title_id, e.season, e.number
+      FROM media_files f JOIN episodes e ON e.id = f.episode_id
+      WHERE e.season > 0
+      ORDER BY e.title_id, e.season, e.number
+    `)
+    .all();
+
+  if (episodeFile.length < 2 || episodeFile[0].title_id !== episodeFile[1].title_id) {
+    console.log('  note  no series with two episodes on this server — next up not exercised');
+  } else {
+    const viewer = await createUser({
+      username: `selftest_next_${Date.now()}`, displayName: 'Next', password: 'testing123',
+    });
+    const [first, second] = episodeFile;
+    const watch = (fileId, position, duration, completed) =>
+      sdb.prepare(`
+        INSERT INTO playback_state (user_id, media_file_id, title_id, position, duration, completed, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(user_id, media_file_id) DO UPDATE SET
+          position = excluded.position, completed = excluded.completed, updated_at = datetime('now')
+      `).run(viewer.id, fileId, first.title_id, position, duration, completed);
+
+    check('a series nobody has started is not offered', nextUp(viewer.id).length === 0);
+
+    watch(first.file_id, 1180, 1200, 1);
+    const after = nextUp(viewer.id);
+    check('finishing an episode offers the next one',
+      after.length === 1 && after[0].resume.episode === second.number,
+      `got ${JSON.stringify(after.map((t) => t.resume?.episode))}`);
+
+    watch(second.file_id, 180, 1200, 0);
+    check('an episode already in progress is left to continue watching',
+      nextUp(viewer.id).length === 0 && continueWatching(viewer.id).length === 1);
+
+    // Finishing the second one moves the marker along: either there is a
+    // third episode to offer or the series has run out. Both are correct;
+    // what would be wrong is still offering the episode just finished.
+    watch(second.file_id, 1190, 1200, 1);
+    const onwards = nextUp(viewer.id);
+    check('the episode just finished is never offered back',
+      onwards.every((t) => t.resume.episode !== second.number || t.resume.season !== second.season),
+      JSON.stringify(onwards.map((t) => `S${t.resume.season}E${t.resume.episode}`)));
+
+    const remaining = sdb
+      .prepare(`
+        SELECT COUNT(*) AS n FROM episodes e JOIN media_files f ON f.episode_id = e.id
+        WHERE e.title_id = ? AND e.season > 0 AND (e.season * 1000 + e.number) > ?
+      `)
+      .get(first.title_id, second.season * 1000 + second.number).n;
+    check(remaining ? 'the following episode is offered next' : 'a series watched to the end drops out',
+      remaining ? onwards.length === 1 : onwards.length === 0,
+      `${remaining} episode(s) left, next up returned ${onwards.length}`);
+
+    sdb.prepare('DELETE FROM playback_state WHERE user_id = ?').run(viewer.id);
+    sdb.prepare('DELETE FROM users WHERE id = ?').run(viewer.id);
+  }
+}
+
 // --- parental limits --------------------------------------------------------
 // A limit that looks configured and quietly allows everything is worse than no
 // limit at all, so this walks the real path: the user as a request sees them,

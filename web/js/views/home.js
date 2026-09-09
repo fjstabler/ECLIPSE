@@ -21,7 +21,7 @@ export async function HomeView({ outlet }) {
   outlet.replaceChildren();
 
   if (!data.rows.length) {
-    outlet.append(emptyLibrary());
+    outlet.append(data.filteredByRating ? nothingPermitted() : emptyLibrary());
     return;
   }
 
@@ -105,6 +105,23 @@ function skeleton() {
       )
     )
   );
+}
+
+/**
+ * There is plenty here — this profile just isn't allowed to see any of it.
+ * Usually an age limit on a server whose titles have no certification,
+ * since unrated counts as blocked.
+ */
+function nothingPermitted() {
+  return el('div', { class: 'page page--padded' },
+    el('div', { class: 'empty' },
+      el('h2', {}, 'Nothing here is available on this profile'),
+      el('p', {},
+        'This profile has an age limit, and nothing in the library is rated within it. ',
+        'Titles ECLIPSE could not classify count as blocked, so a library without ratings will look empty. ',
+        'An administrator can change the limit under Settings → Profiles.'),
+      el('div', { class: 'empty__actions' },
+        el('button', { class: 'btn btn--ghost btn--sm', type: 'button', onClick: () => navigate('/settings') }, 'Open settings'))));
 }
 
 function emptyLibrary() {

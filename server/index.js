@@ -114,7 +114,38 @@ const server = app.listen(config.port, config.host, async () => {
   }
 
   startWatcher();
+  startScheduledScan();
 });
+
+/**
+ * The library re-read on a timer.
+ *
+ * The watcher catches files dropped into a local folder, but a library
+ * mounted over NFS or SMB — a NAS, another machine, the usual arrangement —
+ * emits no filesystem events to watch at all, so without this a file added
+ * from anywhere other than this machine would sit there unseen until
+ * somebody restarted the server or pressed Scan by hand.
+ */
+function startScheduledScan() {
+  const hours = config.scanner.intervalHours;
+  if (!hours || hours <= 0) return null;
+
+  const timer = setInterval(() => {
+    runScan()
+      .then((r) => {
+        if (r.skipped) return;
+        if (r.added || r.updated || r.removed) {
+          console.log(`[scan] scheduled — ${r.added} added, ${r.updated} updated, ${r.removed} removed`);
+        }
+      })
+      .catch((err) => console.warn(`[scan] scheduled scan failed: ${err.message}`));
+  }, hours * 3600_000);
+
+  // Never hold the process open for a scan that hasn't come round yet.
+  timer.unref();
+  console.log(`[scan] re-reading the library every ${hours} hour${hours === 1 ? '' : 's'}`);
+  return timer;
+}
 
 // Long-lived video streams shouldn't be cut off by a default header timeout.
 server.headersTimeout = 0;

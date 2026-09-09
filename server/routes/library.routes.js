@@ -33,6 +33,12 @@ router.get('/home', (req, res) => {
   const resume = library.continueWatching(userId);
   if (resume.length) rows.push({ id: 'continue', title: 'Continue watching', items: resume });
 
+  // Next up sits directly under Continue watching: together they are "what
+  // was I in the middle of" and "what comes after that", which is most of
+  // what anyone opens a media server to find out.
+  const next = library.nextUp(userId, 18);
+  if (next.length) rows.push({ id: 'next-up', title: 'Next up', items: next });
+
   const watchlist = library.getWatchlist(userId, 18);
   if (watchlist.length) rows.push({ id: 'watchlist', title: 'Your list', items: watchlist });
 
@@ -41,14 +47,24 @@ router.get('/home', (req, res) => {
 
   rows.push(...homeRows(userId));
 
+  const beforeFilter = rows.reduce((n, r) => n + r.items.length, 0);
   for (const row of rows) row.items = permitted(row.items, req.user);
+  const afterFilter = rows.reduce((n, r) => n + r.items.length, 0);
 
   // The hero is the strongest N.O.V.A. pick with a backdrop to show behind it.
   const novaRow = rows.find((r) => r.id === 'for-you');
   const heroPool = (novaRow?.items || rows.find((r) => r.items.length)?.items || []).filter((t) => t.backdrop);
   const hero = heroPool[0] ? library.getTitleDetail(heroPool[0].id, userId) : null;
 
-  res.json({ hero, rows: rows.filter((r) => r.items.length) });
+  res.json({
+    hero,
+    rows: rows.filter((r) => r.items.length),
+    // A profile with an age limit on a server whose titles are unrated sees
+    // nothing at all, which is the right call and a terrible thing to
+    // present as "your library is empty" — that sends someone off to check
+    // their folders when the answer is a setting on this profile.
+    filteredByRating: afterFilter === 0 && beforeFilter > 0,
+  });
 });
 
 router.get('/titles', (req, res) => {
