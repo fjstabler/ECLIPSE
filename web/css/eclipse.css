@@ -1345,6 +1345,15 @@ textarea.input { height: auto; min-height: 96px; padding: 12px 15px; line-height
   border: 1px solid var(--hairline); border-radius: 4px; padding: 1px 5px; margin-top: 4px;
 }
 
+.backup-list { display: grid; gap: 8px; margin: 14px 0 18px; }
+.backup-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 14px; border: 1px solid var(--hairline); border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.backup-row__name { font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.backup-row__meta { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
+
 /* ===================== phones =====================
    Everything below assumes a thumb rather than a pointer: nothing is
    revealed by hover, targets are big enough to hit, and the primary

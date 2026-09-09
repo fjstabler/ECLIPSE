@@ -127,6 +127,9 @@ export const api = {
   adminSessions: () => request('GET', '/api/admin/sessions'),
   adminStopSession: (id) => request('DELETE', `/api/admin/sessions/${id}`),
   adminLogs: (level) => request('GET', `/api/admin/logs${level ? `?level=${level}` : ''}`),
+  adminBackups: () => request('GET', '/api/admin/backups'),
+  adminCreateBackup: () => request('POST', '/api/admin/backups'),
+  adminBackupUrl: (name) => `/api/admin/backups/${encodeURIComponent(name)}`,
   adminRenameDevice: (id, name) => request('PATCH', `/api/admin/devices/${id}`, { name }),
   adminDeleteDevice: (id) => request('DELETE', `/api/admin/devices/${id}`),
 

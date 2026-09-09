@@ -107,16 +107,50 @@ the container with it — your library, watch history and profiles all live
 in the `data/` folder (bind-mounted from the host, untouched by rebuilds),
 not inside the image.
 
+## 5. Backups
+
+ECLIPSE copies its database to `data/backups/` once a day and keeps the last
+seven. That database is the only part of the install that can't be rebuilt:
+profiles and PINs, what everyone has watched and how far in, lists, ratings,
+favourites, taste profiles and your library setup. The media itself can
+always be re-scanned and the artwork re-fetched.
+
+Take one on demand, and download one to keep somewhere else, from
+**Settings → Server → Backups**. A backup that only exists on the disk that
+fails hasn't saved anything, so copy them off the box:
+
+```bash
+# From the Proxmox host, pull the whole backup folder somewhere safe
+rsync -a root@<container-ip>:/opt/eclipse/ECLIPSE/data/backups/ /mnt/backups/eclipse/
+```
+
+To restore one:
+
+```bash
+cd ECLIPSE
+docker compose down                       # stop the server first
+cp data/backups/eclipse-<timestamp>.db data/eclipse.db
+rm -f data/eclipse.db-wal data/eclipse.db-shm   # stale sidecars of the old database
+docker compose up -d
+```
+
+Don't copy `data/eclipse.db` by hand while the server is running: the
+database runs in WAL mode, so recent writes live in `eclipse.db-wal` and a
+plain `cp` of the main file silently loses them. The backups ECLIPSE takes
+are made through SQLite's own online-backup API, which captures a consistent
+snapshot including the write-ahead log while the server keeps serving.
+
 ## Notes
 
 - **Network shares (NFS/SMB) and the folder watcher.** ECLIPSE watches your
   library folders for new files automatically (`ECLIPSE_WATCH=true`), which
   relies on Linux's inotify — this generally does *not* work reliably across
   a network filesystem. If your media lives on a NAS mounted into the
-  container, new files may not be picked up until the next scan. Either
-  trigger a rescan yourself after adding files (Settings → Library, or `npm
-  run scan` — `docker compose exec eclipse npm run scan` from the host) or
-  leave `ECLIPSE_SCAN_ON_BOOT=true` and restart the container periodically.
+  container, that watch will report nothing. This is what the periodic
+  re-read is for: ECLIPSE scans the whole library every
+  `ECLIPSE_SCAN_INTERVAL_HOURS` (6 by default), so files added from another
+  machine turn up on their own. Lower it if you want them sooner, or rescan
+  on demand from Settings → Library.
 - **Multiple library folders.** If `ECLIPSE_MOVIES_DIR` or
   `ECLIPSE_SERIES_DIR` lists more than one `:`-separated path, only the
   first is bind-mounted by the compose file as shipped — add another

@@ -13,6 +13,7 @@ const MODULES = [
   '../server/preferences.js',
   '../server/libraries.js',
   '../server/health.js',
+  '../server/backup.js',
   '../server/util/parse.js',
   '../server/media/probe.js',
   '../server/media/streams.js',
@@ -355,6 +356,38 @@ console.log('\nmedia inspection');
 
     fsp.rmSync(dir, { recursive: true, force: true });
   }
+}
+
+// --- backups ----------------------------------------------------------------
+// The database is the one part of an install that cannot be rebuilt, and it
+// runs in WAL mode — so a backup that misses the write-ahead log silently
+// loses whatever happened most recently, which is exactly the data anyone
+// would be restoring for.
+
+console.log('\nbackups');
+{
+  const { createBackup, listBackups } = await import('../server/backup.js');
+  const Database = (await import('better-sqlite3')).default;
+
+  const marker = `selftest-backup-${Date.now()}`;
+  db.prepare("INSERT INTO server_log (level, scope, message) VALUES ('info', 'selftest', ?)").run(marker);
+
+  const made = await createBackup();
+  check('a backup is written', made.size > 0, `${made.size} bytes`);
+
+  const copy = new Database(made.file, { readonly: true });
+  check('the backup is a valid database', copy.pragma('integrity_check')[0].integrity_check === 'ok');
+  check('it carries writes still in the write-ahead log',
+    Boolean(copy.prepare('SELECT 1 FROM server_log WHERE message = ?').get(marker)),
+    'a backup missing recent writes is worse than none');
+  check('it has the whole schema',
+    copy.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table'").get().n >= 20);
+  copy.close();
+
+  check('it is listed', listBackups().some((b) => b.name === made.name));
+  check('no more than seven are kept', listBackups().length <= 7, `${listBackups().length} present`);
+
+  db.prepare('DELETE FROM server_log WHERE message = ?').run(marker);
 }
 
 // --- the server actually starts ---------------------------------------------

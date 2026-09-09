@@ -10,6 +10,7 @@ import { novaAvailable } from '../nova/openai.js';
 import { sortTitle } from '../util/parse.js';
 import { cacheImage } from '../metadata/artwork.js';
 import { listLibraries, createLibrary, updateLibrary, deleteLibrary } from '../libraries.js';
+import { createBackup, listBackups, backupPath } from '../backup.js';
 import { activeSessions, listDevices, endSession, transcodeCount } from '../media/sessions.js';
 import { detectHardware } from '../media/transcode.js';
 import { recentLogs, logCounts, log } from '../log.js';
@@ -274,4 +275,28 @@ router.delete('/users/:id', (req, res) => {
   if (remainingAdmins === 0) return res.status(400).json({ error: 'That is the last administrator' });
   db.prepare('DELETE FROM users WHERE id = ?').run(id);
   res.json({ ok: true });
+});
+
+// --- backups ----------------------------------------------------------------
+
+router.get('/backups', (req, res) => {
+  res.json({ backups: listBackups() });
+});
+
+router.post('/backups', async (req, res) => {
+  try {
+    res.json(await createBackup());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Hand a backup over so it can be kept somewhere other than this machine —
+ * a backup that only exists on the disk that fails is not a backup.
+ */
+router.get('/backups/:name', (req, res) => {
+  const file = backupPath(req.params.name);
+  if (!file) return res.status(404).json({ error: 'No backup by that name' });
+  res.download(file);
 });

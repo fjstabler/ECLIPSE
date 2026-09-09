@@ -595,12 +595,56 @@ async function PlaybackPanel() {
  * while the tab is open, because "is it still scanning" is a question you ask
  * by looking, not by pressing reload.
  */
+/**
+ * Copies of the database, which is the one part of an install that cannot be
+ * rebuilt from what is on disk: profiles, PINs, what everyone has watched,
+ * their lists and ratings, and the library setup.
+ *
+ * The download matters as much as the backup does — one that only exists on
+ * the machine that fails has not saved anything.
+ */
+function BackupsCard(rows, refresh) {
+  const makeBtn = el('button', {
+    class: 'btn btn--corona btn--sm', type: 'button',
+    onClick: async () => {
+      makeBtn.disabled = true;
+      try {
+        await api.adminCreateBackup();
+        toast('Database backed up');
+        await refresh();
+      } catch (err) {
+        toast(err.message);
+      } finally {
+        makeBtn.disabled = false;
+      }
+    },
+  }, 'Back up now');
+
+  return el('div', { class: 'panel' },
+    el('h2', { class: 'panel__title' }, 'Backups'),
+    el('p', { class: 'panel__hint' },
+      'A copy of the database — every profile, everything watched, all lists and ratings, and the library setup. ',
+      'Taken automatically each day, keeping the last seven. Media and artwork are not included: those can be scanned again, this cannot. ',
+      'Download one and keep it somewhere other than this machine.'),
+    rows.length
+      ? el('div', { class: 'backup-list' },
+          rows.map((b) =>
+            el('div', { class: 'backup-row' },
+              el('div', {},
+                el('div', { class: 'backup-row__name' }, b.name.replace(/^eclipse-|\.db$/g, '').replace('T', ' ').replace(/-(\d\d)-(\d\d)$/, ':$1:$2')),
+                el('div', { class: 'backup-row__meta' }, formatBytes(b.size))),
+              el('a', { class: 'btn btn--ghost btn--sm', href: api.adminBackupUrl(b.name), download: b.name }, 'Download'))))
+      : el('p', { class: 'panel__hint' }, 'No backups yet. The first one is taken a minute after the server starts.'),
+    makeBtn);
+}
+
 async function ServerPanel() {
   const panel = el('div', { class: 'panel-stack' });
   const health = el('div', {});
   const sessions = el('div', {});
   const logs = el('div', {});
-  panel.append(health, sessions, logs);
+  const backups = el('div', {});
+  panel.append(health, sessions, backups, logs);
 
   let timer = null;
   let stopped = false;
@@ -626,7 +670,15 @@ async function ServerPanel() {
     } catch { /* the panel above already reports a dead server */ }
   }
 
+  async function refreshBackups() {
+    try {
+      const { backups: rows } = await api.adminBackups();
+      if (!stopped) clear(backups).append(BackupsCard(rows, refreshBackups));
+    } catch { /* the panel above already reports a dead server */ }
+  }
+
   await refresh();
+  await refreshBackups();
   await refreshLogs();
 
   // Poll while the tab is on screen, and stop the moment it isn't — a

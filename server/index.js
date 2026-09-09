@@ -7,6 +7,7 @@ import { isFirstRun } from './db.js';
 import { attachUser, pruneSessions } from './auth.js';
 import { runScan } from './scanner/scanner.js';
 import { startWatcher, stopWatcher } from './scanner/watcher.js';
+import { startScheduledBackups } from './backup.js';
 import { syncConfigLibraries, listLibraries } from './libraries.js';
 
 import { router as authRoutes } from './routes/auth.routes.js';
@@ -115,6 +116,7 @@ const server = app.listen(config.port, config.host, async () => {
 
   startWatcher();
   startScheduledScan();
+  startScheduledBackups();
 });
 
 /**

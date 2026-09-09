@@ -72,6 +72,12 @@ export const config = {
     intervalHours: Number(process.env.ECLIPSE_SCAN_INTERVAL_HOURS ?? 6),
   },
 
+  // Copies of the database, taken while the server runs. The media can be
+  // re-scanned; watch history, profiles and lists cannot.
+  backup: {
+    intervalHours: Number(process.env.ECLIPSE_BACKUP_INTERVAL_HOURS ?? 24),
+  },
+
   // Transcoding is optional. If ffmpeg is on PATH, ECLIPSE can remux containers
   // the browser can't open natively (most .mkv files) on the fly.
   ffmpeg: {
