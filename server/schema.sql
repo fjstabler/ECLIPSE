@@ -98,12 +98,33 @@ CREATE TABLE IF NOT EXISTS media_files (
   video_codec TEXT,
   audio_codec TEXT,
   direct_play INTEGER NOT NULL DEFAULT 1,
+  -- What the file actually is, past codec names: container, how fast it runs,
+  -- how many bits deep, and whether it carries HDR. All of it drives either a
+  -- playback decision or the technical panel on the title page.
+  container   TEXT,
+  bitrate     INTEGER,               -- bits/sec, whole file
+  video_bitrate INTEGER,
+  frame_rate  REAL,
+  bit_depth   INTEGER,
+  pixel_format TEXT,
+  color_space TEXT,
+  color_transfer TEXT,
+  color_primaries TEXT,
+  hdr_format  TEXT,                  -- 'HDR10' | 'HDR10+' | 'Dolby Vision' | 'HLG'
+  aspect_ratio TEXT,
+  video_profile TEXT,
+  stream_count INTEGER,
+  -- Which generation of the prober last read this file. A file described by an
+  -- older version is re-read on the next scan, so upgrades backfill themselves.
+  probe_version INTEGER NOT NULL DEFAULT 0,
   scanned_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_files_title ON media_files(title_id);
 CREATE INDEX IF NOT EXISTS idx_files_episode ON media_files(episode_id);
 
+-- Subtitle files sitting next to the video. Embedded subtitle tracks live in
+-- media_streams instead — they're part of the file, not separate from it.
 CREATE TABLE IF NOT EXISTS subtitles (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   media_file_id INTEGER NOT NULL REFERENCES media_files(id) ON DELETE CASCADE,
@@ -114,20 +135,66 @@ CREATE TABLE IF NOT EXISTS subtitles (
   UNIQUE (media_file_id, path)
 );
 
--- Embedded audio tracks, from ffprobe. track_index is 0-based among audio
--- streams only, matching ffmpeg's own "0:a:N" stream-map syntax exactly —
--- that's what the transcode route passes straight through when a viewer
--- picks a language.
-CREATE TABLE IF NOT EXISTS audio_tracks (
+-- Every stream inside a file, exactly as ffprobe reports it.
+--
+-- type_index is the position among streams of the same kind, which is what
+-- ffmpeg's own "-map 0:a:1" syntax addresses; stream_index is the absolute
+-- position in the container. Confusing the two is how a player ends up
+-- playing the wrong language, so both are stored rather than derived later.
+CREATE TABLE IF NOT EXISTS media_streams (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   media_file_id INTEGER NOT NULL REFERENCES media_files(id) ON DELETE CASCADE,
-  track_index   INTEGER NOT NULL,
+  kind          TEXT NOT NULL CHECK (kind IN ('video', 'audio', 'subtitle')),
+  stream_index  INTEGER NOT NULL,
+  type_index    INTEGER NOT NULL,
   codec         TEXT,
+  codec_long    TEXT,
   language      TEXT,
+  title         TEXT,
   label         TEXT,
-  channels      INTEGER,
   is_default    INTEGER NOT NULL DEFAULT 0,
-  UNIQUE (media_file_id, track_index)
+  is_forced     INTEGER NOT NULL DEFAULT 0,
+  is_hearing_impaired INTEGER NOT NULL DEFAULT 0,
+  is_visual_impaired  INTEGER NOT NULL DEFAULT 0,
+  is_commentary INTEGER NOT NULL DEFAULT 0,
+  -- Subtitles only: text can become WebVTT, pictures can only be burned in.
+  is_text       INTEGER NOT NULL DEFAULT 0,
+  is_extractable INTEGER NOT NULL DEFAULT 0,
+  channels      INTEGER,
+  channel_layout TEXT,
+  sample_rate   INTEGER,
+  bitrate       INTEGER,
+  width         INTEGER,
+  height        INTEGER,
+  frame_rate    REAL,
+  bit_depth     INTEGER,
+  profile       TEXT,
+  UNIQUE (media_file_id, stream_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_streams_file ON media_streams(media_file_id, kind, type_index);
+
+CREATE TABLE IF NOT EXISTS chapters (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  media_file_id INTEGER NOT NULL REFERENCES media_files(id) ON DELETE CASCADE,
+  idx           INTEGER NOT NULL,
+  title         TEXT,
+  start_time    REAL NOT NULL,
+  end_time      REAL,
+  UNIQUE (media_file_id, idx)
+);
+
+-- Skippable sections. Derived from chapter names rather than guessed at:
+-- a chapter called "Opening Credits" is an intro, and that is the only claim
+-- ECLIPSE can honestly make without fingerprinting the audio itself.
+CREATE TABLE IF NOT EXISTS media_markers (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  media_file_id INTEGER NOT NULL REFERENCES media_files(id) ON DELETE CASCADE,
+  kind          TEXT NOT NULL CHECK (kind IN ('intro', 'credits', 'recap')),
+  start_time    REAL NOT NULL,
+  end_time      REAL NOT NULL,
+  source        TEXT NOT NULL DEFAULT 'chapters',
+  UNIQUE (media_file_id, kind)
 );
 
 -- ---------------------------------------------------------------------------
@@ -230,6 +297,34 @@ CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+-- Devices that have connected. Keyed by a value the client generates once and
+-- keeps, so a TV stays one row rather than becoming a new one every time its
+-- user agent gains a version number.
+CREATE TABLE IF NOT EXISTS devices (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  device_key  TEXT NOT NULL UNIQUE,
+  name        TEXT NOT NULL,
+  kind        TEXT NOT NULL DEFAULT 'unknown',
+  user_agent  TEXT,
+  renamed     INTEGER NOT NULL DEFAULT 0,   -- a name its owner chose is never overwritten
+  first_seen  TEXT NOT NULL DEFAULT (datetime('now')),
+  last_seen   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- What the server has been doing, so the admin page can answer "why did that
+-- fail" without anyone reading a terminal.
+CREATE TABLE IF NOT EXISTS server_log (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  level      TEXT NOT NULL CHECK (level IN ('info', 'warn', 'error')),
+  scope      TEXT NOT NULL,
+  message    TEXT NOT NULL,
+  detail     TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_log_time ON server_log(created_at DESC);
 
 CREATE TABLE IF NOT EXISTS scan_log (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,

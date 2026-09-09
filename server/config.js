@@ -73,18 +73,32 @@ export const config = {
     bin: process.env.FFMPEG_PATH || 'ffmpeg',
     probeBin: process.env.FFPROBE_PATH || 'ffprobe',
     enabled: process.env.ECLIPSE_TRANSCODE !== 'false',
+    // 'auto' tries every hardware encoder ffmpeg was built with and keeps the
+    // first that actually encodes a frame; 'off' forces software; or name one
+    // directly (h264_nvenc, h264_qsv, h264_vaapi, h264_videotoolbox).
+    hwaccel: process.env.ECLIPSE_HWACCEL || 'auto',
+    // How many encodes may run at once. Each one costs a chunk of a CPU, so
+    // the honest failure ("the server is busy") beats every stream stuttering.
+    maxSessions: Number(process.env.ECLIPSE_MAX_TRANSCODES || 3),
+    // Ceilings applied to every stream. 0 means "whatever the file is".
+    maxHeight: Number(process.env.ECLIPSE_MAX_HEIGHT || 0),
+    maxBitrate: Number(process.env.ECLIPSE_MAX_BITRATE || 0),
   },
 };
 
 export const paths = {
   db: path.join(config.dataDir, 'eclipse.db'),
   artwork: path.join(config.dataDir, 'artwork'),
+  // Extracted subtitle tracks. Pulling one out of a large mkv means demuxing
+  // the whole file, so it's done once and kept rather than on every play.
+  subtitles: path.join(config.dataDir, 'subtitles'),
   web: path.join(ROOT, 'web'),
 };
 
 export function ensureDataDirs() {
   fs.mkdirSync(config.dataDir, { recursive: true });
   fs.mkdirSync(paths.artwork, { recursive: true });
+  fs.mkdirSync(paths.subtitles, { recursive: true });
 }
 
 export const VIDEO_EXTENSIONS = new Set([

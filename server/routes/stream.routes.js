@@ -1,11 +1,16 @@
 import express from 'express';
 import fs from 'node:fs';
-import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { config } from '../config.js';
-import { db } from '../db.js';
 import { requireAuth } from '../auth.js';
-import { getMediaFile, playbackContext } from '../library.js';
+import { getMediaFile, playbackContext, getTitle } from '../library.js';
+import { db } from '../db.js';
+import { log } from '../log.js';
+import { resolveSubtitle } from '../media/subtitles.js';
+import { decidePlayback, buildArgs, detectHardware } from '../media/transcode.js';
+import {
+  startSession, attachProcess, endSession, transcodeCount, registerDevice,
+} from '../media/sessions.js';
 
 export const router = express.Router();
 
@@ -25,11 +30,32 @@ const MIME_TYPES = {
   '.flv': 'video/x-flv',
 };
 
-/** Playback metadata: what to play, from where, and what comes next. */
+/** Playback metadata: what to play, what can be switched, and what follows. */
 router.get('/context/:fileId', requireAuth, (req, res) => {
   const ctx = playbackContext(Number(req.params.fileId), req.user.id);
-  if (!ctx) return res.status(404).json({ error: 'File not found' });
+  if (!ctx) return res.status(404).json({ error: 'That file is not in the library' });
   res.json(ctx);
+});
+
+/**
+ * What would happen if this device played this file — before it commits to
+ * trying. The player asks first so it can pick the right URL, and so the
+ * technical panel can explain why something is being converted.
+ */
+router.get('/decide/:fileId', requireAuth, async (req, res) => {
+  const file = getMediaFile(Number(req.params.fileId));
+  if (!file) return res.status(404).json({ error: 'That file is not in the library' });
+
+  const capabilities = parseCapabilities(req.query);
+  const decision = decidePlayback(file, capabilities, serverLimits());
+  const hardware = decision.needsVideoEncode ? await detectHardware() : null;
+
+  res.json({
+    ...decision,
+    hardware: hardware?.available ? hardware.label : null,
+    canDirectPlay: decision.method === 'direct',
+    busy: decision.method === 'transcode' && transcodeCount() >= config.ffmpeg.maxSessions,
+  });
 });
 
 /**
@@ -41,10 +67,20 @@ router.get('/context/:fileId', requireAuth, (req, res) => {
  */
 router.get('/direct/:fileId', requireAuth, (req, res) => {
   const file = getMediaFile(Number(req.params.fileId));
-  if (!file) return res.status(404).json({ error: 'File not found' });
-  if (!fs.existsSync(file.path)) return res.status(410).json({ error: 'File is no longer on disk' });
+  if (!file) return res.status(404).json({ error: 'That file is not in the library' });
+  if (!fs.existsSync(file.path)) {
+    log.warn('stream', `Missing file on disk: ${file.path}`);
+    return res.status(410).json({ error: 'That file is no longer on disk' });
+  }
 
-  const stat = fs.statSync(file.path);
+  let stat;
+  try {
+    stat = fs.statSync(file.path);
+  } catch (err) {
+    log.error('stream', `Could not read ${file.path}`, err.message);
+    return res.status(500).json({ error: 'That file could not be read' });
+  }
+
   const total = stat.size;
   const mime = MIME_TYPES[file.extension] || 'application/octet-stream';
   const range = req.headers.range;
@@ -90,73 +126,103 @@ router.get('/direct/:fileId', requireAuth, (req, res) => {
 });
 
 /**
- * On-the-fly remux for containers the browser can't open (most .mkv).
+ * Remux or re-encode, whichever this device actually needs.
  *
- * This copies the video stream where possible and only re-encodes audio, which
- * is cheap enough to run on a NAS. Seeking works by restarting the pipe at an
- * offset — the player passes ?t=<seconds> and sets currentTime to match.
+ * Seeking works by restarting the pipe at an offset — the player passes
+ * ?t=<seconds> and sets currentTime to match — because a fragmented mp4 on a
+ * pipe has no length for the browser to byte-seek into.
  */
-router.get('/transcode/:fileId', requireAuth, (req, res) => {
+router.get('/transcode/:fileId', requireAuth, async (req, res) => {
   if (!config.ffmpeg.enabled) {
-    return res.status(503).json({ error: 'Transcoding is disabled on this server' });
+    return res.status(503).json({ error: 'Transcoding is switched off on this server' });
   }
 
   const file = getMediaFile(Number(req.params.fileId));
-  if (!file) return res.status(404).json({ error: 'File not found' });
-  if (!fs.existsSync(file.path)) return res.status(410).json({ error: 'File is no longer on disk' });
+  if (!file) return res.status(404).json({ error: 'That file is not in the library' });
+  if (!fs.existsSync(file.path)) return res.status(410).json({ error: 'That file is no longer on disk' });
 
   const startAt = Math.max(0, Number(req.query.t) || 0);
-  const forceVideo = req.query.mode === 'full';
+  const audioTrack = req.query.audio !== undefined && req.query.audio !== '' ? Number(req.query.audio) : null;
+  const burnSubtitle = req.query.burn !== undefined && req.query.burn !== '' ? Number(req.query.burn) : null;
 
-  // A specific language track, chosen in the player. Left unset, ffmpeg
-  // picks its own default — same behaviour as before this existed.
-  const audioTrack = req.query.audio !== undefined ? Number(req.query.audio) : null;
-  const audioMap = Number.isInteger(audioTrack) && audioTrack >= 0 ? ['-map', '0:v:0', '-map', `0:a:${audioTrack}`] : [];
+  const capabilities = parseCapabilities(req.query);
+  const limits = serverLimits();
+  if (req.query.maxHeight) limits.maxHeight = Number(req.query.maxHeight);
+  if (req.query.maxBitrate) limits.maxBitrate = Number(req.query.maxBitrate);
 
-  // Copy the video stream unless the codec can't play in a browser.
-  const videoArgs =
-    forceVideo || !['h264', 'vp8', 'vp9', 'av1'].includes(file.video_codec || 'h264')
-      ? ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-profile:v', 'high', '-level', '4.1']
-      : ['-c:v', 'copy'];
+  const decision = decidePlayback(file, capabilities, {
+    ...limits,
+    audioTrack,
+    burnSubtitle,
+    // "mode=full" is the player saying it tried the cheap path and the video
+    // still didn't play, so stop copying the stream and actually encode it.
+    ...(req.query.mode === 'full' ? { forceEncode: true } : {}),
+  });
+  if (req.query.mode === 'full') {
+    decision.method = 'transcode';
+    decision.needsVideoEncode = true;
+  }
 
-  const args = [
-    '-hide_banner',
-    '-loglevel', 'error',
-    ...(startAt > 0 ? ['-ss', String(startAt)] : []),
-    '-i', file.path,
-    ...audioMap,
-    ...videoArgs,
-    '-c:a', 'aac',
-    '-ac', '2',
-    '-b:a', '192k',
-    '-sn',
-    '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
-    '-f', 'mp4',
-    'pipe:1',
-  ];
+  // Encodes are the expensive kind. Refusing a fourth one plainly is better
+  // than accepting it and making all four stutter.
+  if (decision.needsVideoEncode && transcodeCount() >= config.ffmpeg.maxSessions) {
+    log.warn('stream', `Refused a transcode: ${config.ffmpeg.maxSessions} already running`);
+    return res.status(503).json({
+      error: 'The server is already converting as many streams as it can handle. Try again in a moment.',
+      code: 'TRANSCODE_BUSY',
+    });
+  }
+
+  const { args, hardware } = await buildArgs({ file, decision, startAt, audioTrack, burnSubtitle });
+
+  const device = registerDevice({
+    userId: req.user.id,
+    deviceKey: req.get('x-eclipse-device'),
+    userAgent: req.get('user-agent'),
+  });
+
+  const title = getTitle(file.title_id);
+  const episode = file.episode_id ? db.prepare('SELECT * FROM episodes WHERE id = ?').get(file.episode_id) : null;
+  const sessionId = startSession({
+    userId: req.user.id,
+    deviceId: device?.id ?? null,
+    file,
+    title,
+    episode,
+    decision,
+    hardware,
+    method: decision.needsVideoEncode ? 'transcode' : 'remux',
+  });
 
   res.setHeader('Content-Type', 'video/mp4');
   res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Eclipse-Session', sessionId);
+  res.setHeader('X-Eclipse-Method', decision.needsVideoEncode ? 'transcode' : 'remux');
   // A piped fragmented mp4 has no length and can't be byte-seeked.
   res.setHeader('Accept-Ranges', 'none');
 
   const ff = spawn(config.ffmpeg.bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-  let stderr = '';
+  attachProcess(sessionId, ff);
 
+  let stderr = '';
   ff.stderr.on('data', (d) => {
     stderr += d.toString();
     if (stderr.length > 4000) stderr = stderr.slice(-4000);
   });
 
   ff.on('error', (err) => {
-    console.warn(`[stream] ffmpeg failed to start: ${err.message}`);
+    log.error('stream', `ffmpeg failed to start for ${file.filename}`, err.message);
+    endSession(sessionId);
     if (!res.headersSent) res.status(503).json({ error: 'ffmpeg is not available on this server' });
     else res.destroy();
   });
 
   ff.on('close', (code) => {
-    if (code !== 0 && code !== null && stderr) {
-      console.warn(`[stream] ffmpeg exited ${code}: ${stderr.split('\n').slice(-3).join(' ')}`);
+    endSession(sessionId);
+    // 255 is what ffmpeg exits with when it gets killed, which is the normal
+    // way a session ends — the viewer navigated away.
+    if (code !== 0 && code !== null && code !== 255 && stderr) {
+      log.error('stream', `Conversion of ${file.filename} failed`, stderr.split('\n').slice(-3).join(' '));
     }
     res.end();
   });
@@ -165,42 +231,41 @@ router.get('/transcode/:fileId', requireAuth, (req, res) => {
   // episode keeps a CPU core busy until ffmpeg reaches the end of the file.
   // Watch the response only: a request stream can be destroyed (and emit
   // 'close') as soon as it has been read, which would kill ffmpeg immediately.
-  const cleanup = () => {
-    if (!ff.killed) ff.kill('SIGKILL');
-  };
-  res.on('close', cleanup);
+  res.on('close', () => endSession(sessionId));
 
   ff.stdout.pipe(res);
 });
 
-/** Sidecar subtitles, converted to WebVTT because that's what <track> wants. */
-router.get('/subtitles/:subtitleId', requireAuth, (req, res) => {
-  const row = db.prepare('SELECT * FROM subtitles WHERE id = ?').get(Number(req.params.subtitleId));
-  if (!row) return res.status(404).json({ error: 'Subtitle not found' });
-  if (!fs.existsSync(row.path)) return res.status(410).json({ error: 'Subtitle file is missing' });
+/**
+ * A subtitle track as WebVTT — embedded or sidecar, the player doesn't care
+ * which. Track ids come straight from the playback context.
+ */
+router.get('/subtitles/:fileId/:trackId', requireAuth, async (req, res) => {
+  const file = getMediaFile(Number(req.params.fileId));
+  if (!file) return res.status(404).json({ error: 'That file is not in the library' });
 
-  const ext = path.extname(row.path).toLowerCase();
-  res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
-
-  if (ext === '.vtt') return fs.createReadStream(row.path).pipe(res);
-
-  if (ext === '.srt') {
-    const srt = fs.readFileSync(row.path, 'utf8');
-    return res.send(srtToVtt(srt));
+  const result = await resolveSubtitle(file, req.params.trackId);
+  if (result.error) {
+    return res.status(result.status || 500).json({ error: result.error, requiresBurnIn: result.requiresBurnIn || false });
   }
 
-  // .ass/.ssa need ffmpeg to convert; skip rather than serve something broken.
-  if (!config.ffmpeg.enabled) return res.status(415).json({ error: 'Unsupported subtitle format' });
-  const ff = spawn(config.ffmpeg.bin, ['-hide_banner', '-loglevel', 'error', '-i', row.path, '-f', 'webvtt', 'pipe:1']);
-  ff.on('error', () => res.status(503).end());
-  ff.stdout.pipe(res);
+  res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+  if (result.path) return fs.createReadStream(result.path).pipe(res);
+  res.send(result.body);
 });
 
-/** SubRip and WebVTT differ by a header and a comma. */
-function srtToVtt(srt) {
-  const body = srt
-    .replace(/\r+/g, '')
-    .replace(/^﻿/, '')
-    .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
-  return `WEBVTT\n\n${body}`;
+/** What a client says it can play, as query parameters. */
+function parseCapabilities(query) {
+  const list = (v) => (typeof v === 'string' && v ? v.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean) : []);
+  return {
+    videoCodecs: list(query.video),
+    audioCodecs: list(query.audio_codecs),
+    maxHeight: Number(query.maxHeight) || 0,
+    maxBitrate: Number(query.maxBitrate) || 0,
+  };
+}
+
+function serverLimits() {
+  return { maxHeight: config.ffmpeg.maxHeight, maxBitrate: config.ffmpeg.maxBitrate };
 }

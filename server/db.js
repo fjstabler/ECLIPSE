@@ -25,6 +25,28 @@ function ensureColumn(table, column, ddl) {
 }
 ensureColumn('title_tags', 'image', 'image TEXT');
 
+// Everything the deeper file inspection added. Existing rows keep whatever
+// they had; probe_version defaulting to 0 is what makes the next scan re-read
+// them with the current prober rather than leaving them half-described.
+for (const [column, ddl] of [
+  ['container', 'container TEXT'],
+  ['bitrate', 'bitrate INTEGER'],
+  ['video_bitrate', 'video_bitrate INTEGER'],
+  ['frame_rate', 'frame_rate REAL'],
+  ['bit_depth', 'bit_depth INTEGER'],
+  ['pixel_format', 'pixel_format TEXT'],
+  ['color_space', 'color_space TEXT'],
+  ['color_transfer', 'color_transfer TEXT'],
+  ['color_primaries', 'color_primaries TEXT'],
+  ['hdr_format', 'hdr_format TEXT'],
+  ['aspect_ratio', 'aspect_ratio TEXT'],
+  ['video_profile', 'video_profile TEXT'],
+  ['stream_count', 'stream_count INTEGER'],
+  ['probe_version', 'probe_version INTEGER NOT NULL DEFAULT 0'],
+]) {
+  ensureColumn('media_files', column, ddl);
+}
+
 export function getSetting(key, fallback = null) {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
   return row ? row.value : fallback;

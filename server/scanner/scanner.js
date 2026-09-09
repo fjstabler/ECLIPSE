@@ -1,15 +1,12 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { db } from '../db.js';
 import { config, VIDEO_EXTENSIONS, DIRECT_PLAY_EXTENSIONS, SUBTITLE_EXTENSIONS } from '../config.js';
-import { parseMovie, parseEpisode, sortTitle, parseSubtitleLanguage, LANGUAGE_NAMES } from '../util/parse.js';
+import { parseMovie, parseEpisode, sortTitle, parseSubtitleLanguage } from '../util/parse.js';
+import { probeFile, PROBE_VERSION } from '../media/probe.js';
 import * as tmdb from '../metadata/tmdb.js';
 import { cacheImage, placeholderPoster, placeholderBackdrop } from '../metadata/artwork.js';
-
-const execFileAsync = promisify(execFile);
 
 let scanning = false;
 let lastProgress = { state: 'idle', found: 0, processed: 0, added: 0, updated: 0, removed: 0, current: null };
@@ -50,54 +47,21 @@ async function walk(dir, out = []) {
   return out;
 }
 
-/** Ask ffprobe for duration and codecs. Optional — absence just means less detail. */
-async function probe(filePath) {
-  if (!config.ffmpeg.enabled) return null;
-  try {
-    const { stdout } = await execFileAsync(
-      config.ffmpeg.probeBin,
-      ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', filePath],
-      { timeout: 20000, maxBuffer: 4 * 1024 * 1024 }
-    );
-    const data = JSON.parse(stdout);
-    const video = (data.streams || []).find((s) => s.codec_type === 'video');
-    const audioStreams = (data.streams || []).filter((s) => s.codec_type === 'audio');
-    const audio = audioStreams[0];
-    return {
-      duration: data.format?.duration ? Number(data.format.duration) : null,
-      width: video?.width || null,
-      height: video?.height || null,
-      videoCodec: video?.codec_name || null,
-      audioCodec: audio?.codec_name || null,
-      // track_index is the position among audio streams only (0, 1, 2…) —
-      // deliberately not ffprobe's absolute stream index, because that's
-      // what ffmpeg's own "-map 0:a:N" wants when a track gets selected.
-      audioTracks: audioStreams.map((s, i) => {
-        const lang = (s.tags?.language || '').toLowerCase() || null;
-        return {
-          trackIndex: i,
-          codec: s.codec_name || null,
-          language: lang && lang !== 'und' ? lang : null,
-          label: s.tags?.title || (lang ? LANGUAGE_NAMES[lang] : null) || (lang ? lang.toUpperCase() : `Track ${i + 1}`),
-          channels: s.channels || null,
-          isDefault: s.disposition?.default === 1,
-        };
-      }),
-    };
-  } catch {
-    return null;
-  }
-}
-
 /**
- * A file is "direct play" when the browser can open it without help. mp4/webm
- * with h264/aac almost always work; mkv and h265 generally need a remux.
+ * A file is "direct play" when a browser can open it with no help at all.
+ * mp4/webm carrying h264/aac almost always work; mkv, HEVC and the surround
+ * formats generally need at least a remux.
+ *
+ * Reads either shape — a fresh probe result or the stored row — because the
+ * scan only re-probes files that changed.
  */
 function isDirectPlay(ext, probed) {
   if (!DIRECT_PLAY_EXTENSIONS.has(ext)) return false;
   if (!probed) return true;
-  const okVideo = !probed.videoCodec || ['h264', 'vp8', 'vp9', 'av1'].includes(probed.videoCodec);
-  const okAudio = !probed.audioCodec || ['aac', 'mp3', 'opus', 'vorbis', 'flac'].includes(probed.audioCodec);
+  const videoCodec = probed.videoCodec ?? probed.video_codec;
+  const audioCodec = probed.audioCodec ?? probed.audio_codec;
+  const okVideo = !videoCodec || ['h264', 'vp8', 'vp9', 'av1'].includes(videoCodec);
+  const okAudio = !audioCodec || ['aac', 'mp3', 'opus', 'vorbis', 'flac'].includes(audioCodec);
   return okVideo && okAudio;
 }
 
@@ -366,9 +330,13 @@ async function attachFile({ filePath, stat, titleId, episodeId }) {
   const ext = path.extname(filePath).toLowerCase();
   const existing = getFileByPath.get(filePath);
 
-  // Only re-probe when the file actually changed — probing is the slow part.
+  // Probing is the slow part of a scan, so it only happens when there's a
+  // reason: the file changed, or it was last read by an older prober that
+  // didn't know about (say) subtitle streams. The second case is what makes
+  // an upgrade backfill the whole library on its next scan by itself.
   const unchanged = existing && existing.size === stat.size && existing.mtime === Math.floor(stat.mtimeMs);
-  const probed = unchanged ? null : await probe(filePath);
+  const staleProbe = !existing || (existing.probe_version ?? 0) < PROBE_VERSION;
+  const probed = unchanged && !staleProbe ? null : await probeFile(filePath);
 
   const row = {
     title_id: titleId,
@@ -383,18 +351,40 @@ async function attachFile({ filePath, stat, titleId, episodeId }) {
     height: probed?.height ?? existing?.height ?? null,
     video_codec: probed?.videoCodec ?? existing?.video_codec ?? null,
     audio_codec: probed?.audioCodec ?? existing?.audio_codec ?? null,
+    container: probed?.container ?? existing?.container ?? null,
+    bitrate: probed?.bitrate ?? existing?.bitrate ?? null,
+    video_bitrate: probed?.videoBitrate ?? existing?.video_bitrate ?? null,
+    frame_rate: probed?.frameRate ?? existing?.frame_rate ?? null,
+    bit_depth: probed?.bitDepth ?? existing?.bit_depth ?? null,
+    pixel_format: probed?.pixelFormat ?? existing?.pixel_format ?? null,
+    color_space: probed?.colorSpace ?? existing?.color_space ?? null,
+    color_transfer: probed?.colorTransfer ?? existing?.color_transfer ?? null,
+    color_primaries: probed?.colorPrimaries ?? existing?.color_primaries ?? null,
+    hdr_format: probed?.hdrFormat ?? existing?.hdr_format ?? null,
+    aspect_ratio: probed?.aspectRatio ?? existing?.aspect_ratio ?? null,
+    video_profile: probed?.videoProfile ?? existing?.video_profile ?? null,
+    stream_count: probed?.streamCount ?? existing?.stream_count ?? null,
+    probe_version: probed ? PROBE_VERSION : existing?.probe_version ?? 0,
     direct_play: isDirectPlay(ext, probed || existing) ? 1 : 0,
   };
 
   db.prepare(`
     INSERT INTO media_files (title_id, episode_id, path, filename, extension, size, mtime, duration,
-      width, height, video_codec, audio_codec, direct_play, scanned_at)
+      width, height, video_codec, audio_codec, container, bitrate, video_bitrate, frame_rate, bit_depth,
+      pixel_format, color_space, color_transfer, color_primaries, hdr_format, aspect_ratio, video_profile,
+      stream_count, probe_version, direct_play, scanned_at)
     VALUES (@title_id, @episode_id, @path, @filename, @extension, @size, @mtime, @duration,
-      @width, @height, @video_codec, @audio_codec, @direct_play, datetime('now'))
+      @width, @height, @video_codec, @audio_codec, @container, @bitrate, @video_bitrate, @frame_rate, @bit_depth,
+      @pixel_format, @color_space, @color_transfer, @color_primaries, @hdr_format, @aspect_ratio, @video_profile,
+      @stream_count, @probe_version, @direct_play, datetime('now'))
     ON CONFLICT(path) DO UPDATE SET
       title_id=@title_id, episode_id=@episode_id, size=@size, mtime=@mtime, duration=@duration,
       width=@width, height=@height, video_codec=@video_codec, audio_codec=@audio_codec,
-      direct_play=@direct_play, scanned_at=datetime('now')
+      container=@container, bitrate=@bitrate, video_bitrate=@video_bitrate, frame_rate=@frame_rate,
+      bit_depth=@bit_depth, pixel_format=@pixel_format, color_space=@color_space,
+      color_transfer=@color_transfer, color_primaries=@color_primaries, hdr_format=@hdr_format,
+      aspect_ratio=@aspect_ratio, video_profile=@video_profile, stream_count=@stream_count,
+      probe_version=@probe_version, direct_play=@direct_play, scanned_at=datetime('now')
   `).run(row);
 
   const fileRow = getFileByPath.get(filePath);
@@ -407,21 +397,118 @@ async function attachFile({ filePath, stat, titleId, episodeId }) {
     ).run(fileRow.id, s.path, s.language, s.label, s.forced ? 1 : 0);
   }
 
-  // Embedded audio tracks — only known when this pass actually re-probed the
-  // file (a fresh probe reflects reality; an unchanged file keeps whatever
-  // was found last time, so there's nothing to replace it with here).
-  if (probed?.audioTracks) {
-    db.prepare('DELETE FROM audio_tracks WHERE media_file_id = ?').run(fileRow.id);
-    const insertTrack = db.prepare(`
-      INSERT INTO audio_tracks (media_file_id, track_index, codec, language, label, channels, is_default)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
-    for (const t of probed.audioTracks) {
-      insertTrack.run(fileRow.id, t.trackIndex, t.codec, t.language, t.label, t.channels, t.isDefault ? 1 : 0);
-    }
+  // Streams, chapters and skip markers are only replaced when this pass
+  // actually read the file. An unchanged file keeps what was found last time
+  // — there's nothing newer to replace it with.
+  if (probed) {
+    storeStreams(fileRow.id, probed.streams);
+    storeChapters(fileRow.id, probed.chapters);
   }
 
   return { fileRow, isNew: !existing };
+}
+
+function storeStreams(fileId, streams = []) {
+  db.prepare('DELETE FROM media_streams WHERE media_file_id = ?').run(fileId);
+  const insert = db.prepare(`
+    INSERT INTO media_streams (media_file_id, kind, stream_index, type_index, codec, codec_long,
+      language, title, label, is_default, is_forced, is_hearing_impaired, is_visual_impaired,
+      is_commentary, is_text, is_extractable, channels, channel_layout, sample_rate, bitrate,
+      width, height, frame_rate, bit_depth, profile)
+    VALUES (@media_file_id, @kind, @stream_index, @type_index, @codec, @codec_long,
+      @language, @title, @label, @is_default, @is_forced, @is_hearing_impaired, @is_visual_impaired,
+      @is_commentary, @is_text, @is_extractable, @channels, @channel_layout, @sample_rate, @bitrate,
+      @width, @height, @frame_rate, @bit_depth, @profile)
+  `);
+  const run = db.transaction((rows) => {
+    for (const s of rows) {
+      insert.run({
+        media_file_id: fileId,
+        kind: s.kind,
+        stream_index: s.streamIndex,
+        type_index: s.typeIndex,
+        codec: s.codec,
+        codec_long: s.codecLong,
+        language: s.language,
+        title: s.title,
+        label: s.label,
+        is_default: s.isDefault ? 1 : 0,
+        is_forced: s.isForced ? 1 : 0,
+        is_hearing_impaired: s.isHearingImpaired ? 1 : 0,
+        is_visual_impaired: s.isVisualImpaired ? 1 : 0,
+        is_commentary: s.isCommentary ? 1 : 0,
+        is_text: s.isText ? 1 : 0,
+        is_extractable: s.isExtractable ? 1 : 0,
+        channels: s.channels ?? null,
+        channel_layout: s.channelLayout ?? null,
+        sample_rate: s.sampleRate ?? null,
+        bitrate: s.bitrate ?? null,
+        width: s.width ?? null,
+        height: s.height ?? null,
+        frame_rate: s.frameRate ?? null,
+        bit_depth: s.bitDepth ?? null,
+        profile: s.profile ?? null,
+      });
+    }
+  });
+  run(streams);
+}
+
+function storeChapters(fileId, chapters = []) {
+  db.prepare('DELETE FROM chapters WHERE media_file_id = ?').run(fileId);
+  db.prepare('DELETE FROM media_markers WHERE media_file_id = ? AND source = ?').run(fileId, 'chapters');
+  if (!chapters.length) return;
+
+  const insert = db.prepare(
+    'INSERT INTO chapters (media_file_id, idx, title, start_time, end_time) VALUES (?, ?, ?, ?, ?)'
+  );
+  const run = db.transaction((rows) => {
+    for (const c of rows) insert.run(fileId, c.index, c.title, c.start, c.end);
+  });
+  run(chapters);
+
+  for (const marker of derivedMarkers(chapters)) {
+    db.prepare(`
+      INSERT OR REPLACE INTO media_markers (media_file_id, kind, start_time, end_time, source)
+      VALUES (?, ?, ?, ?, 'chapters')
+    `).run(fileId, marker.kind, marker.start, marker.end);
+  }
+}
+
+/**
+ * Turn chapter names into skippable sections.
+ *
+ * Nothing here guesses: a chapter has to actually say it's an intro, a recap
+ * or the end credits before ECLIPSE will offer to skip it. Detecting those
+ * sections in a file that doesn't label them needs audio fingerprinting
+ * against other episodes, which is a different feature — offering a "Skip
+ * intro" button that jumps to the wrong place is worse than not offering one.
+ */
+function derivedMarkers(chapters) {
+  const markers = [];
+  const INTRO = /\b(intro|opening|opening credits|op|title sequence|main title|titles)\b/i;
+  const RECAP = /\b(recap|previously|previously on)\b/i;
+  const CREDITS = /\b(end credits|closing credits|credits|ending|outro|ed)\b/i;
+
+  for (const c of chapters) {
+    if (c.end == null || c.end <= c.start) continue;
+    const name = c.title || '';
+    if (!name) continue;
+
+    // An "intro" long enough to be the feature itself is a mislabelled
+    // chapter, not something anyone wants to skip past.
+    const length = c.end - c.start;
+    if (length > 300) continue;
+
+    if (RECAP.test(name)) markers.push({ kind: 'recap', start: c.start, end: c.end });
+    else if (INTRO.test(name)) markers.push({ kind: 'intro', start: c.start, end: c.end });
+    else if (CREDITS.test(name)) markers.push({ kind: 'credits', start: c.start, end: c.end });
+  }
+
+  // One of each: the first intro/recap, and the last set of credits.
+  const first = (kind) => markers.find((m) => m.kind === kind);
+  const last = (kind) => [...markers].reverse().find((m) => m.kind === kind);
+  return [first('recap'), first('intro'), last('credits')].filter(Boolean);
 }
 
 // --- the scan itself --------------------------------------------------------

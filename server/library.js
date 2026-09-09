@@ -1,4 +1,9 @@
 import { db } from './db.js';
+import {
+  getAudioTracks, getSubtitleTracks, getChapters, getMarkers, technicalInfo, qualityLabel, versionLabel,
+} from './media/streams.js';
+
+export { getAudioTracks, getSubtitleTracks, technicalInfo };
 
 /**
  * Shared read model for the library. Both the HTTP API and N.O.V.A.'s tools go
@@ -174,19 +179,18 @@ function publicFile(f) {
     height: f.height,
     videoCodec: f.video_codec,
     audioCodec: f.audio_codec,
+    container: f.container,
+    bitrate: f.bitrate,
+    frameRate: f.frame_rate,
+    bitDepth: f.bit_depth,
+    hdrFormat: f.hdr_format,
+    aspectRatio: f.aspect_ratio,
     directPlay: f.direct_play === 1,
     position: f.position || 0,
     completed: f.completed === 1,
     quality: qualityLabel(f.height),
+    versionLabel: versionLabel(f),
   };
-}
-
-function qualityLabel(height) {
-  if (!height) return null;
-  if (height >= 2000) return '4K';
-  if (height >= 1000) return '1080p';
-  if (height >= 700) return '720p';
-  return 'SD';
 }
 
 /** Where should this user pick up? Next unwatched episode, or the film itself. */
@@ -307,17 +311,34 @@ export function getMediaFile(id) {
   return db.prepare('SELECT * FROM media_files WHERE id = ?').get(id);
 }
 
-export function getSubtitles(mediaFileId) {
-  return db.prepare('SELECT * FROM subtitles WHERE media_file_id = ?').all(mediaFileId);
+/**
+ * Every file that is the same thing as this one — the 4K next to the 1080p,
+ * the director's cut next to the theatrical. A title with one file has one
+ * version; the player only offers a choice when there's genuinely one to make.
+ */
+export function getVersions(fileOrId, userId = null) {
+  const file = typeof fileOrId === 'object' ? fileOrId : getMediaFile(fileOrId);
+  if (!file) return [];
+
+  const rows = file.episode_id
+    ? db.prepare(`
+        SELECT f.*, ps.position, ps.completed FROM media_files f
+        LEFT JOIN playback_state ps ON ps.media_file_id = f.id AND ps.user_id = ?
+        WHERE f.episode_id = ? ORDER BY f.height DESC, f.size DESC
+      `).all(userId ?? -1, file.episode_id)
+    : db.prepare(`
+        SELECT f.*, ps.position, ps.completed FROM media_files f
+        LEFT JOIN playback_state ps ON ps.media_file_id = f.id AND ps.user_id = ?
+        WHERE f.title_id = ? AND f.episode_id IS NULL ORDER BY f.height DESC, f.size DESC
+      `).all(userId ?? -1, file.title_id);
+
+  return rows.map(publicFile);
 }
 
-export function getAudioTracks(mediaFileId) {
-  return db
-    .prepare('SELECT * FROM audio_tracks WHERE media_file_id = ? ORDER BY track_index')
-    .all(mediaFileId);
-}
-
-/** Playback context: what is this file, and what plays after it? */
+/**
+ * Playback context: what this file is, what a viewer can switch between while
+ * it plays, and what follows it.
+ */
 export function playbackContext(fileId, userId) {
   const file = getMediaFile(fileId);
   if (!file) return null;
@@ -327,16 +348,27 @@ export function playbackContext(fileId, userId) {
     : null;
 
   let next = null;
+  let previous = null;
   if (episode) {
     const n = db
       .prepare(`
-        SELECT e.id, e.season, e.number, e.name, f.id AS file_id
+        SELECT e.id, e.season, e.number, e.name, e.still, f.id AS file_id
         FROM episodes e JOIN media_files f ON f.episode_id = e.id
         WHERE e.title_id = ? AND (e.season > ? OR (e.season = ? AND e.number > ?))
         ORDER BY e.season, e.number LIMIT 1
       `)
       .get(file.title_id, episode.season, episode.season, episode.number);
-    if (n) next = { fileId: n.file_id, season: n.season, episode: n.number, name: n.name };
+    if (n) next = { fileId: n.file_id, season: n.season, episode: n.number, name: n.name, still: n.still };
+
+    const p = db
+      .prepare(`
+        SELECT e.id, e.season, e.number, e.name, f.id AS file_id
+        FROM episodes e JOIN media_files f ON f.episode_id = e.id
+        WHERE e.title_id = ? AND (e.season < ? OR (e.season = ? AND e.number < ?))
+        ORDER BY e.season DESC, e.number DESC LIMIT 1
+      `)
+      .get(file.title_id, episode.season, episode.season, episode.number);
+    if (p) previous = { fileId: p.file_id, season: p.season, episode: p.number, name: p.name };
   }
 
   const state = userId
@@ -350,11 +382,14 @@ export function playbackContext(fileId, userId) {
       ? { id: episode.id, season: episode.season, number: episode.number, name: episode.name, overview: episode.overview }
       : null,
     next,
+    previous,
     position: state?.position || 0,
-    subtitles: getSubtitles(fileId).map((s) => ({ id: s.id, label: s.label, language: s.language, forced: s.forced === 1 })),
-    audioTracks: getAudioTracks(fileId).map((t) => ({
-      trackIndex: t.track_index, label: t.label, language: t.language, channels: t.channels, isDefault: t.is_default === 1,
-    })),
+    audioTracks: getAudioTracks(fileId),
+    subtitles: getSubtitleTracks(fileId),
+    chapters: getChapters(fileId),
+    markers: getMarkers(fileId),
+    versions: getVersions(file, userId),
+    technical: technicalInfo(file),
   };
 }
 

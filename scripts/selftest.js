@@ -8,7 +8,13 @@ const MODULES = [
   '../server/db.js',
   '../server/library.js',
   '../server/auth.js',
+  '../server/log.js',
   '../server/util/parse.js',
+  '../server/media/probe.js',
+  '../server/media/streams.js',
+  '../server/media/subtitles.js',
+  '../server/media/transcode.js',
+  '../server/media/sessions.js',
   '../server/scanner/scanner.js',
   '../server/scanner/watcher.js',
   '../server/metadata/tmdb.js',
@@ -89,7 +95,10 @@ const { recommend, saveTasteProfile, buildTasteVector, similarTo } = await impor
 const { runTool, buildSystemPrompt } = await import('../server/nova/tools.js');
 
 const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name);
-for (const t of ['titles', 'title_tags', 'media_files', 'users', 'playback_state', 'ratings', 'taste_profiles', 'nova_messages']) {
+for (const t of [
+  'titles', 'title_tags', 'media_files', 'media_streams', 'chapters', 'media_markers',
+  'users', 'playback_state', 'ratings', 'taste_profiles', 'nova_messages', 'devices', 'server_log',
+]) {
   check(`table ${t}`, tables.includes(t));
 }
 
@@ -131,6 +140,81 @@ if (titleCount === 0) {
 }
 
 db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+
+// --- media inspection -------------------------------------------------------
+// Builds a real file with several audio and subtitle tracks and reads it back,
+// because "ECLIPSE understands what's actually in your files" is a claim worth
+// re-proving on every change rather than trusting.
+
+console.log('\nmedia inspection');
+{
+  const { spawnSync } = await import('node:child_process');
+  const os = await import('node:os');
+  const fsp = await import('node:fs');
+  const pathMod = await import('node:path');
+
+  const haveFfmpeg = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' }).status === 0;
+  if (!haveFfmpeg) {
+    console.log('  skip  ffmpeg not installed — media inspection not checked');
+  } else {
+    const dir = fsp.mkdtempSync(pathMod.join(os.tmpdir(), 'eclipse-selftest-'));
+    const fixture = pathMod.join(dir, 'fixture.mkv');
+    const srt = pathMod.join(dir, 'sub.srt');
+    fsp.writeFileSync(srt, '1\n00:00:00,500 --> 00:00:02,000\nline\n');
+
+    const build = spawnSync('ffmpeg', [
+      '-y', '-loglevel', 'error',
+      '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=10:duration=3',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3',
+      '-f', 'lavfi', '-i', 'sine=frequency=660:duration=3',
+      '-i', srt,
+      '-map', '0:v', '-map', '1:a', '-map', '2:a', '-map', '3',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-c:a', 'aac', '-c:s', 'srt',
+      '-metadata:s:a:0', 'language=eng', '-metadata:s:a:1', 'language=jpn',
+      '-metadata:s:s:0', 'language=fre',
+      fixture,
+    ], { stdio: 'ignore' });
+
+    if (build.status !== 0) {
+      check('build a test file to inspect', false, 'ffmpeg could not create the fixture');
+    } else {
+      const { probeFile } = await import('../server/media/probe.js');
+      const probed = await probeFile(fixture);
+
+      check('reads the container and duration', probed?.container === 'matroska' && Math.round(probed.duration) === 3);
+      check('reads video properties', probed?.videoCodec === 'h264' && probed.width === 320 && probed.height === 180);
+
+      const audio = probed.streams.filter((s) => s.kind === 'audio');
+      check('finds every audio track', audio.length === 2, `found ${audio.length}`);
+      check('reads audio languages', audio[0]?.language === 'eng' && audio[1]?.language === 'jpn');
+      check('numbers audio tracks the way ffmpeg maps them', audio[1]?.typeIndex === 1);
+
+      const subs = probed.streams.filter((s) => s.kind === 'subtitle');
+      check('finds embedded subtitles', subs.length === 1, `found ${subs.length}`);
+      check('reads the subtitle language it actually has', subs[0]?.language === 'fre');
+      check('knows text subtitles can be extracted', subs[0]?.isExtractable === true);
+
+      const { decidePlayback } = await import('../server/media/transcode.js');
+      const asIs = decidePlayback(
+        { video_codec: 'h264', audio_codec: 'aac', direct_play: 1, height: 180 }, {}, {}
+      );
+      check('h264/aac in a playable container direct plays', asIs.method === 'direct');
+
+      const hevc = decidePlayback(
+        { video_codec: 'hevc', audio_codec: 'aac', direct_play: 0, height: 2160 }, {}, {}
+      );
+      check('HEVC transcodes for a plain browser', hevc.method === 'transcode');
+
+      const hevcTv = decidePlayback(
+        { video_codec: 'hevc', audio_codec: 'aac', direct_play: 0, height: 2160 },
+        { videoCodecs: ['h264', 'hevc'], audioCodecs: ['aac'] }, {}
+      );
+      check('a device that decodes HEVC only needs a remux', hevcTv.method === 'remux');
+    }
+
+    fsp.rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 console.log(failures === 0 ? '\nAll checks passed.\n' : `\n${failures} check(s) failed.\n`);
 process.exit(failures === 0 ? 0 : 1);
