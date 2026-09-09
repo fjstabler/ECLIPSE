@@ -61,6 +61,32 @@ export async function TitleView({ params, outlet }) {
     },
   }, icon(title.isFavourite ? 'heartFilled' : 'heart'));
 
+  // A film has one file and one watched state, so it gets the same control
+  // as an episode, in the row of actions rather than beside a list.
+  const watchedBtn = title.kind === 'movie' && title.primaryFile
+    ? el('button', {
+        class: `btn btn--ghost btn--icon${title.primaryFile.completed ? ' is-on' : ''}`,
+        type: 'button', title: 'Watched',
+        'aria-label': title.primaryFile.completed ? 'Mark as unwatched' : 'Mark as watched',
+        onClick: async (e) => {
+          const next = !title.primaryFile.completed;
+          const btn = e.currentTarget;
+          btn.disabled = true;
+          try {
+            await api.setWatched(title.primaryFile.id, next);
+            title.primaryFile.completed = next;
+            btn.classList.toggle('is-on', next);
+            btn.setAttribute('aria-label', next ? 'Mark as unwatched' : 'Mark as watched');
+            toast(next ? 'Marked as watched' : 'Marked as unwatched');
+          } catch (err) {
+            toast(err.message);
+          } finally {
+            btn.disabled = false;
+          }
+        },
+      }, icon('check'))
+    : null;
+
   const rateBtn = (score, iconName, label) =>
     el('button', {
       class: `btn btn--ghost btn--icon${title.userRating === score ? ' is-on' : ''}`,
@@ -114,6 +140,7 @@ export async function TitleView({ params, outlet }) {
           : el('button', { class: 'btn btn--play', type: 'button', disabled: true }, icon('play'), 'No playable file'),
         watchlistBtn,
         favouriteBtn,
+        watchedBtn,
         rateBtn(1, 'thumbUp', 'I liked this'),
         rateBtn(-1, 'thumbDown', 'Not for me'),
         el('button', {
@@ -215,26 +242,30 @@ function EpisodeBrowser(title) {
     clear(list);
     for (const ep of seasons[activeIndex].episodes) {
       const progress = ep.position && ep.runtime ? ep.position / (ep.runtime * 60) : 0;
-      list.append(
-        el('button', {
-          class: 'episode', type: 'button',
-          disabled: !ep.fileId,
-          onClick: () => ep.fileId && openPlayer(ep.fileId, ep.completed ? 0 : ep.position || 0),
-        },
-          el('div', { class: 'episode__num' }, String(ep.number)),
-          el('div', { class: 'episode__still' },
-            ep.still ? el('img', { src: ep.still, alt: '', loading: 'lazy' }) : null,
-            progress > 0.02 && !ep.completed
-              ? el('div', { class: 'card__progress', style: { position: 'absolute', bottom: 0, left: 0, right: 0 } },
-                  el('span', { style: { width: `${Math.min(100, progress * 100)}%` } }))
-              : null),
-          el('div', {},
-            el('p', { class: 'episode__name' },
-              ep.name || `Episode ${ep.number}`,
-              ep.completed ? el('span', { style: { color: 'var(--good)', marginLeft: '8px', fontSize: '11px' } }, '✓ Watched') : null),
-            el('p', { class: 'episode__desc' }, ep.overview || 'No synopsis available.')),
-          el('div', { class: 'episode__time' }, ep.runtime ? formatRuntime(ep.runtime) : ''))
-      );
+      const flag = ep.completed
+        ? el('span', { class: 'episode__flag' }, '✓ Watched')
+        : el('span', { class: 'episode__flag', hidden: true }, '✓ Watched');
+
+      const row = el('button', {
+        class: 'episode', type: 'button',
+        disabled: !ep.fileId,
+        onClick: () => ep.fileId && openPlayer(ep.fileId, ep.completed ? 0 : ep.position || 0),
+      },
+        el('div', { class: 'episode__num' }, String(ep.number)),
+        el('div', { class: 'episode__still' },
+          ep.still ? el('img', { src: ep.still, alt: '', loading: 'lazy' }) : null,
+          progress > 0.02 && !ep.completed
+            ? el('div', { class: 'card__progress', style: { position: 'absolute', bottom: 0, left: 0, right: 0 } },
+                el('span', { style: { width: `${Math.min(100, progress * 100)}%` } }))
+            : null),
+        el('div', {},
+          el('p', { class: 'episode__name' }, ep.name || `Episode ${ep.number}`, flag),
+          el('p', { class: 'episode__desc' }, ep.overview || 'No synopsis available.')),
+        el('div', { class: 'episode__time' }, ep.runtime ? formatRuntime(ep.runtime) : ''));
+
+      list.append(ep.fileId
+        ? el('div', { class: 'episode-line' }, row, WatchedToggle(ep, flag))
+        : row);
     }
   }
 
@@ -244,6 +275,44 @@ function EpisodeBrowser(title) {
     el('p', { class: 'detail__label' }, 'EPISODES'),
     bar,
     list);
+}
+
+/**
+ * Mark something watched, or unwatched, by hand.
+ *
+ * The server has recorded this since the beginning and nothing could ever set
+ * it: an episode watched somewhere else, or one ECLIPSE recorded wrongly
+ * because a stream dropped, stayed that way for good. It is also how anyone
+ * starts a series again from the top, which is otherwise impossible.
+ *
+ * A sibling of the episode row rather than a child, because the row is itself
+ * a button and buttons do not nest.
+ */
+function WatchedToggle(ep, flag) {
+  const btn = el('button', {
+    class: `episode__watch${ep.completed ? ' is-on' : ''}`,
+    type: 'button',
+    title: ep.completed ? 'Mark as unwatched' : 'Mark as watched',
+    'aria-label': `Mark episode ${ep.number} as ${ep.completed ? 'unwatched' : 'watched'}`,
+    onClick: async (e) => {
+      e.stopPropagation();
+      const next = !ep.completed;
+      btn.disabled = true;
+      try {
+        await api.setWatched(ep.fileId, next);
+        ep.completed = next;
+        btn.classList.toggle('is-on', next);
+        btn.title = next ? 'Mark as unwatched' : 'Mark as watched';
+        flag.hidden = !next;
+        toast(next ? `Episode ${ep.number} marked watched` : `Episode ${ep.number} marked unwatched`);
+      } catch (err) {
+        toast(err.message);
+      } finally {
+        btn.disabled = false;
+      }
+    },
+  }, icon('check'));
+  return btn;
 }
 
 /**
