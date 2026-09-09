@@ -116,6 +116,31 @@ export function focusElement(el) {
   if (el?.isConnected) setCursor(el);
 }
 
+/**
+ * Give the cursor back after an overlay closes.
+ *
+ * `preferred` is normally whatever opened the overlay — the search button,
+ * the N.O.V.A. button, the control that opened a menu. If it has gone (the
+ * page changed underneath, the button was re-rendered) the cursor is reseeded
+ * onto the page rather than left nowhere: a remote with nothing focused has
+ * no way to tell the viewer where the next press will land.
+ */
+export function restoreCursor(preferred) {
+  if (preferred?.isConnected && isVisible(preferred)) {
+    setCursor(preferred);
+    return;
+  }
+  reseed();
+}
+
+/** Put the cursor somewhere sensible when it currently isn't anywhere. */
+function reseed() {
+  if (cursor) cursor.classList.remove('tv-cursor');
+  cursor = null;
+  const all = candidates();
+  if (all.length) setCursor(groupIntoRows(all)[0]?.items[0]?.el || all[0]);
+}
+
 export function focusFirstIn(container) {
   const items = Array.from(container.querySelectorAll(FOCUSABLE)).filter(isVisible);
   if (items.length) setCursor(groupIntoRows(items)[0]?.items[0]?.el || items[0]);
@@ -252,6 +277,12 @@ export function cancelScrollAnimation() {
 }
 
 function moveFocus(key) {
+  // A safety net for the general case: whatever removed the cursor's element
+  // — an overlay closing, a re-render, a button that vanished on its own —
+  // the next press finds somewhere real to start from rather than doing
+  // nothing at all.
+  if (cursor && (!document.contains(cursor) || !isVisible(cursor))) reseed();
+
   // The player's own control row (no explicit menu/modal open over it) is
   // "ambient" rather than something the viewer deliberately opened — Left
   // and Right stay reserved for the player's direct ±10s seek there until
@@ -285,7 +316,11 @@ function moveFocus(key) {
     setCursor(row.items[idx + 1]?.el);
   } else {
     const targetRow = rows[r + (key === 'ArrowUp' ? -1 : 1)];
-    if (!targetRow) return;
+    // Nothing focusable further down, but the page may still go on: the
+    // server panel is meters, a session list and a log — pages of content
+    // with not one button in them. Without this a remote simply stops at the
+    // last thing it can focus and the rest of the page is unreachable.
+    if (!targetRow) return scrollPast(key);
     // Always the row's first (leftmost) item, not whatever happens to sit
     // nearest the old X position — a shelf you'd scrolled into landing you
     // deep into the *next* shelf too reads as arbitrary, and means the new
@@ -295,13 +330,46 @@ function moveFocus(key) {
   }
 }
 
+/**
+ * Scroll on past the last focusable thing, for read-only content a remote
+ * can't otherwise reach. Stops at the ends rather than rubber-banding, so
+ * holding the button doesn't feel broken at the bottom of a page.
+ */
+function scrollPast(key) {
+  const scroller = scrollableAncestor(cursor);
+  const height = scroller ? scroller.clientHeight : window.innerHeight;
+  const delta = (key === 'ArrowUp' ? -1 : 1) * Math.round(height * 0.7);
+
+  if (scroller) {
+    scroller.scrollBy({ top: delta, behavior: 'smooth' });
+    return;
+  }
+  const max = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+  const next = Math.max(0, Math.min(max, window.scrollY + delta));
+  if (Math.abs(next - window.scrollY) > 1) animateScrollTo(next);
+}
+
+/**
+ * The nearest ancestor that can actually scroll vertically, else the page.
+ *
+ * body and html are deliberately excluded even when they report an
+ * overflow: the viewport-propagation rule means a body whose overflow is
+ * 'auto' under an html of 'visible' is not itself a scroll container, so
+ * calling scrollBy() on it does nothing at all. That case is the page, and
+ * the page is scrolled through the window.
+ */
+function scrollableAncestor(el) {
+  for (let n = el?.parentElement; n && n !== document.body; n = n.parentElement) {
+    const oy = getComputedStyle(n).overflowY;
+    if ((oy === 'auto' || oy === 'scroll') && n.scrollHeight > n.clientHeight + 1) return n;
+  }
+  return null;
+}
+
 function focusFirstIfNeeded() {
   requestAnimationFrame(() => {
     if (cursor && document.contains(cursor) && isVisible(cursor)) return;
-    if (cursor) cursor.classList.remove('tv-cursor');
-    cursor = null;
-    const all = candidates();
-    if (all.length) setCursor(groupIntoRows(all)[0]?.items[0]?.el || all[0]);
+    reseed();
   });
 }
 

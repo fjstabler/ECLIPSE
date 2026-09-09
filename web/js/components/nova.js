@@ -1,5 +1,6 @@
 import { el, icon, clear, miniMarkdown } from '../ui.js';
 import { isOffline } from './states.js';
+import { restoreCursor } from '../tvnav.js';
 import { api, novaChat } from '../api.js';
 import { Card } from './card.js';
 
@@ -9,6 +10,7 @@ import { Card } from './card.js';
  */
 
 let panel = null;
+let openedFrom = null;
 let scrim = null;
 let logNode = null;
 let inputNode = null;
@@ -85,6 +87,9 @@ export function initNova() {
 
 export async function openNova(seed) {
   initNova();
+  // The panel slides over the page but is never removed from it, so a cursor
+  // left inside stays "focused" on something invisible after it closes.
+  if (!panel.classList.contains('is-open')) openedFrom = document.querySelector('.tv-cursor');
   panel.classList.add('is-open');
   scrim.classList.add('is-open');
 
@@ -115,6 +120,8 @@ export function closeNova() {
   if (!panel) return;
   panel.classList.remove('is-open');
   scrim.classList.remove('is-open');
+  restoreCursor(openedFrom);
+  openedFrom = null;
 }
 
 export function toggleNova() {

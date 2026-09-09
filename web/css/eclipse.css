@@ -185,6 +185,7 @@ a.tv-cursor:not(.card), button.tv-cursor:not(.card), [tabindex].tv-cursor:not(.c
 }
 .nav__nova:hover { background: rgba(124, 92, 255, 0.24); border-color: rgba(124,92,255,0.55); }
 .nav__nova:active { transform: scale(0.96); }
+
 .nova-orb {
   width: 16px; height: 16px; border-radius: 50%;
   background: var(--corona);
@@ -1321,4 +1322,87 @@ textarea.input { height: auto; min-height: 96px; padding: 12px 15px; line-height
 .profilepick__hint {
   font-size: 10px; letter-spacing: 0.08em; color: var(--text-faint);
   border: 1px solid var(--hairline); border-radius: 4px; padding: 1px 5px; margin-top: 4px;
+}
+
+/* ===================== phones =====================
+   Everything below assumes a thumb rather than a pointer: nothing is
+   revealed by hover, targets are big enough to hit, and the primary
+   navigation is where a hand already is. Placed last so it wins on order
+   rather than by needing louder selectors. */
+@media (max-width: 680px) {
+  /* ---- navigation ----
+     Four links, a wordmark, a search button, N.O.V.A. and an avatar do not
+     fit across 390 points, and packed into one row they overlapped each
+     other into an unreadable pile. The links move to a bar along the
+     bottom, leaving the top bar for the wordmark and the tools. */
+  .nav { gap: 12px; }
+  .brand__word { font-size: 15px; letter-spacing: 0.18em; text-indent: 0.18em; }
+
+  .nav__links {
+    position: fixed; left: 0; right: 0; bottom: 0; top: auto;
+    flex: none; justify-content: space-around; gap: 0;
+    padding: 6px 4px calc(6px + env(safe-area-inset-bottom, 0px));
+    background: rgba(8, 8, 12, 0.92);
+    backdrop-filter: saturate(160%) blur(18px);
+    border-top: 1px solid var(--hairline);
+    z-index: 100;
+  }
+  .nav__link {
+    flex: 1; text-align: center; padding: 12px 6px; border-radius: 12px;
+    font-size: 12px; letter-spacing: 0.01em;
+  }
+  /* A pill highlight looks like a stray button down here; a top rule reads
+     as a tab, which is what it now is. */
+  .nav__link.is-active { background: none; box-shadow: inset 0 2px 0 var(--corona-1); }
+
+  /* Clear the bar so the last row of a page isn't sitting under it. */
+  .page, .grid { padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
+
+  /* Comfortable thumb targets, which the 34-38px desktop sizes were not. */
+  .iconbtn { width: 44px; height: 44px; }
+  .nav__nova { height: 44px; padding: 0 14px 0 11px; }
+  .avatar { width: 42px; height: 42px; font-size: 14px; }
+
+  /* ---- hero ----
+     At 86vh on a tall phone the title sat most of a screen down, below an
+     expanse of empty backdrop, and the -60px overlap that layers the first
+     shelf under the hero on a desktop instead ran the shelf's own heading
+     through the middle of the hero text. */
+  .hero { min-height: min(62vh, 520px); margin-bottom: 0; padding-bottom: 28px; }
+  .hero__body { max-width: 100%; }
+  .hero__title { font-size: clamp(30px, 9vw, 44px); }
+  .hero__overview { display: none; }
+  .detail__hero { min-height: min(56vh, 460px); }
+
+  /* ---- things that only existed on hover ----
+     A touch screen has no hover, so "See all" was invisible and the row's
+     arrows were unreachable. */
+  .row__more { opacity: 1; padding: 8px 4px; font-size: 13px; }
+  /* The shelf arrows are a pointer affordance over a natively swipeable
+     strip, and on a phone they only cover the cards at each end. */
+  .row__arrow { display: none; }
+
+  /* A 12px-tall disclosure is not a tap target. */
+  .technical__toggle { padding: 12px 0; }
+  .seasonbar button { min-height: 40px; }
+  .select { min-height: 44px; }
+
+  /* ---- the player ----
+     Thirteen controls in one row need 570 points and a phone has 390, so
+     settings, picture-in-picture, mute and fullscreen were simply off the
+     right-hand edge — the settings button being where the version picker
+     and playback speed live. The row wraps instead, transport centred on
+     the first line and the rest beneath it.
+
+     The volume slider goes: it only ever appeared on hover, which a touch
+     screen does not have, and a phone has volume buttons on its side. */
+  .player__bottom { padding: 0 14px 18px; }
+  .player__controls { flex-wrap: wrap; justify-content: center; gap: 6px 8px; }
+  .player__spacer, .player__volume { display: none; }
+  .player__time { order: -1; width: 100%; text-align: center; margin-bottom: 2px; }
+  .player__top { padding: 12px 14px; }
+  .player__title { font-size: 15px; }
+  /* The controls take two rows on a phone, so the skip button has to clear
+     both of them rather than landing across the scrub bar. */
+  .player__skip { right: 14px; bottom: 178px; }
 }

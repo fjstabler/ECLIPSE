@@ -1,16 +1,23 @@
 import { el, icon, clear, initials } from '../ui.js';
 import { api } from '../api.js';
 import { ErrorState } from '../components/states.js';
+import { restoreCursor } from '../tvnav.js';
 import { Card } from '../components/card.js';
 
 /** Full-screen search overlay, opened with the toolbar button or "/". */
 let overlay = null;
+let openedFrom = null;
 
 export function openSearch() {
   if (overlay) {
     overlay.querySelector('.searchbar__input').focus();
     return;
   }
+
+  // The overlay covers the page, so the cursor comes with it and has to be
+  // given back when it closes — otherwise the remote is left pointing at
+  // nothing.
+  openedFrom = document.querySelector('.tv-cursor');
 
   const results = el('div', { class: 'searchbar__body' });
 
@@ -140,6 +147,8 @@ export function closeSearch() {
   overlay.remove();
   overlay = null;
   document.body.classList.remove('is-locked');
+  restoreCursor(openedFrom);
+  openedFrom = null;
 }
 
 export function isSearchOpen() {
