@@ -8,6 +8,7 @@ import { getMediaFile, playbackContext, getTitle } from '../library.js';
 import { db } from '../db.js';
 import { log } from '../log.js';
 import { resolveSubtitle } from '../media/subtitles.js';
+import { ensureTrickplay, trickplayFile } from '../media/trickplay.js';
 import { decidePlayback, buildArgs, detectHardware } from '../media/transcode.js';
 import {
   startSession, attachProcess, endSession, transcodeCount, registerDevice,
@@ -35,7 +36,21 @@ const MIME_TYPES = {
 router.get('/context/:fileId', requireAuth, requirePermittedFile, (req, res) => {
   const ctx = playbackContext(Number(req.params.fileId), req.user.id);
   if (!ctx) return res.status(404).json({ error: 'That file is not in the library' });
+  // Somebody is about to watch this, so it's worth having scrub previews for
+  // it. Returns whatever exists now and queues the work if there is none —
+  // never blocks the play button on a convenience.
+  ensureTrickplay(getMediaFile(Number(req.params.fileId)));
   res.json(ctx);
+});
+
+/** The sprite sheet behind the scrub preview. */
+router.get('/trickplay/:fileId', requireAuth, requirePermittedFile, (req, res) => {
+  const file = trickplayFile(Number(req.params.fileId));
+  if (!file) return res.status(404).json({ error: 'No previews for that file' });
+  // Rebuildable and named by an id that changes with the file, so it can be
+  // cached hard.
+  res.set('Cache-Control', 'public, max-age=604800, immutable');
+  res.sendFile(file);
 });
 
 /**

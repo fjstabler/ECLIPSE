@@ -72,6 +72,12 @@ export const config = {
     intervalHours: Number(process.env.ECLIPSE_SCAN_INTERVAL_HOURS ?? 6),
   },
 
+  // Thumbnails for the scrub bar. Built in the background the first time a
+  // file is played, so an untouched library costs nothing.
+  trickplay: {
+    enabled: process.env.ECLIPSE_TRICKPLAY !== 'false',
+  },
+
   // Copies of the database, taken while the server runs. The media can be
   // re-scanned; watch history, profiles and lists cannot.
   backup: {
@@ -103,6 +109,9 @@ export const paths = {
   // Extracted subtitle tracks. Pulling one out of a large mkv means demuxing
   // the whole file, so it's done once and kept rather than on every play.
   subtitles: path.join(config.dataDir, 'subtitles'),
+  // Sprite sheets for scrubbing. Rebuildable from the media, so losing this
+  // folder costs nothing but the ffmpeg pass to make them again.
+  trickplay: path.join(config.dataDir, 'trickplay'),
   web: path.join(ROOT, 'web'),
 };
 
@@ -110,6 +119,7 @@ export function ensureDataDirs() {
   fs.mkdirSync(config.dataDir, { recursive: true });
   fs.mkdirSync(paths.artwork, { recursive: true });
   fs.mkdirSync(paths.subtitles, { recursive: true });
+  fs.mkdirSync(paths.trickplay, { recursive: true });
 }
 
 export const VIDEO_EXTENSIONS = new Set([

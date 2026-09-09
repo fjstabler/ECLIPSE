@@ -18,6 +18,7 @@ const MODULES = [
   '../server/media/probe.js',
   '../server/media/streams.js',
   '../server/media/subtitles.js',
+  '../server/media/trickplay.js',
   '../server/media/transcode.js',
   '../server/media/sessions.js',
   '../server/scanner/scanner.js',
@@ -354,6 +355,100 @@ console.log('\nmedia inspection');
       check('a device that decodes HEVC only needs a remux', hevcTv.method === 'remux');
     }
 
+    fsp.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// --- scrub previews ---------------------------------------------------------
+// The sprite sheet is only useful if the player can find the right tile in
+// it, which is arithmetic that has to agree on both sides.
+
+console.log('\nscrub previews');
+{
+  const { spawnSync } = await import('node:child_process');
+  const haveFfmpeg = spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' }).status === 0;
+  if (!haveFfmpeg) {
+    console.log('  skip  ffmpeg not installed — scrub previews not checked');
+  } else {
+    const os = await import('node:os');
+    const fsp = await import('node:fs');
+    const pathMod = await import('node:path');
+
+    const dir = fsp.mkdtempSync(pathMod.join(os.tmpdir(), 'eclipse-trick-'));
+    const clip = pathMod.join(dir, 'clip.mp4');
+    const built = spawnSync('ffmpeg', [
+      '-y', '-loglevel', 'error', '-f', 'lavfi',
+      '-i', 'testsrc2=size=320x180:rate=10:duration=90',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p', clip,
+    ], { stdio: 'ignore' });
+
+    if (built.status !== 0) {
+      check('build a clip to preview', false, 'ffmpeg could not create the fixture');
+    } else {
+      // A sheet laid out the way the module lays one out, sliced the way the
+      // player slices one — the two have to agree or every preview is of the
+      // wrong moment.
+      const columns = 20;
+      const tileW = 160;
+      const tileH = 90;
+      const interval = 2;
+      const tileFor = (seconds, count) => {
+        const i = Math.max(0, Math.min(count - 1, Math.floor(seconds / interval)));
+        return { x: -(i % columns) * tileW, y: -Math.floor(i / columns) * tileH };
+      };
+
+      check('the first frame is the top-left tile',
+        JSON.stringify(tileFor(0, 45)) === JSON.stringify({ x: -0, y: -0 }));
+      check('a time inside the first row picks the right column',
+        JSON.stringify(tileFor(30, 45)) === JSON.stringify({ x: -15 * tileW, y: -0 }));
+      check('a time past the first row wraps onto the next',
+        JSON.stringify(tileFor(50, 45)) === JSON.stringify({ x: -5 * tileW, y: -tileH }));
+      check('a time past the end is clamped to the last real tile',
+        JSON.stringify(tileFor(99999, 45)) === JSON.stringify({ x: -4 * tileW, y: -2 * tileH }),
+        'a preview must never point at a cell that was never drawn');
+
+      const { ensureTrickplay, trickplayInfo, clearTrickplay } = await import('../server/media/trickplay.js');
+
+      // Against the clip built above rather than whatever is in the library:
+      // a demo-seeded install carries rows pointing at placeholder files that
+      // exist on disk and contain no video at all.
+      const stat = fsp.statSync(clip);
+      const titleId = db
+        .prepare("INSERT INTO titles (kind, title, sort_title) VALUES ('movie', 'Selftest Clip', 'selftest clip')")
+        .run().lastInsertRowid;
+      const fileId = db
+        .prepare(`
+          INSERT INTO media_files (title_id, path, filename, extension, size, mtime, duration, width, height,
+                                   direct_play, scanned_at, probe_version)
+          VALUES (?, ?, 'clip.mp4', '.mp4', ?, ?, 90, 320, 180, 1, datetime('now'), 1)
+        `)
+        .run(titleId, clip, stat.size, Math.floor(stat.mtimeMs)).lastInsertRowid;
+
+      const row = { id: fileId, path: clip, duration: 90, width: 320, height: 180, filename: 'clip.mp4' };
+      ensureTrickplay(row);
+      // Generation is deliberately in the background, so give it a moment.
+      for (let i = 0; i < 60 && !trickplayInfo(fileId); i += 1) {
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      const info = trickplayInfo(fileId);
+      check('a sheet is generated for a real file', Boolean(info));
+      if (info) {
+        check('it describes a grid the player can slice',
+          info.columns > 0 && info.rows > 0 && info.tileWidth > 0 && info.tileHeight > 0);
+        check('it never claims more frames than the grid holds',
+          info.count <= info.columns * info.rows, `${info.count} in ${info.columns}x${info.rows}`);
+        check('the tiles keep the source aspect ratio',
+          Math.abs(info.tileWidth / info.tileHeight - 320 / 180) < 0.1,
+          `${info.tileWidth}x${info.tileHeight} for a 16:9 source`);
+        check('the frames span the file', info.count * info.interval >= 90 * 0.75,
+          `${info.count} frames every ${info.interval}s across 90s`);
+      }
+
+      clearTrickplay(fileId);
+      check('clearing removes both the row and the sheet', trickplayInfo(fileId) === null);
+      db.prepare('DELETE FROM media_files WHERE id = ?').run(fileId);
+      db.prepare('DELETE FROM titles WHERE id = ?').run(titleId);
+    }
     fsp.rmSync(dir, { recursive: true, force: true });
   }
 }

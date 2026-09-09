@@ -5,6 +5,7 @@ import { db } from '../db.js';
 import { config, VIDEO_EXTENSIONS, DIRECT_PLAY_EXTENSIONS, SUBTITLE_EXTENSIONS } from '../config.js';
 import { parseMovie, parseEpisode, sortTitle, parseSubtitleLanguage } from '../util/parse.js';
 import { probeFile, PROBE_VERSION } from '../media/probe.js';
+import { clearTrickplay } from '../media/trickplay.js';
 import { scanTargets, markScanned } from '../libraries.js';
 import { log } from '../log.js';
 import * as tmdb from '../metadata/tmdb.js';
@@ -621,6 +622,9 @@ export async function runScan({ full = false } = {}) {
     const del = db.prepare('DELETE FROM media_files WHERE id = ?');
     for (const row of known) {
       if (!fs.existsSync(row.path)) {
+        // The row goes by cascade, but the sprite sheet is a file on disk
+        // that nothing else would ever name again.
+        clearTrickplay(row.id);
         del.run(row.id);
         removed += 1;
       }
@@ -730,6 +734,7 @@ export async function ingestPath(filePath, { settled = false } = {}) {
 export function removePath(filePath) {
   const row = getFileByPath.get(filePath);
   if (!row) return false;
+  clearTrickplay(row.id);
   db.prepare('DELETE FROM media_files WHERE id = ?').run(row.id);
   db.exec(`
     DELETE FROM episodes WHERE id NOT IN (SELECT episode_id FROM media_files WHERE episode_id IS NOT NULL);

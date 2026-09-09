@@ -3,6 +3,7 @@ import {
   getAudioTracks, getSubtitleTracks, getChapters, getMarkers, technicalInfo, qualityLabel, versionLabel,
 } from './media/streams.js';
 import { getPreferences, pickTracks } from './preferences.js';
+import { trickplayInfo } from './media/trickplay.js';
 import { ratingSqlFilter } from './parental.js';
 
 export { getAudioTracks, getSubtitleTracks, technicalInfo };
@@ -527,6 +528,9 @@ export function playbackContext(fileId, userId) {
     markers: getMarkers(fileId),
     versions: getVersions(file, userId),
     technical: technicalInfo(file),
+    // null until the sheet has been built, which the player treats as "no
+    // previews yet" rather than as an error.
+    trickplay: trickplayInfo(file.id),
     preferences,
     // Worked out server-side so every client lands on the same track for the
     // same file, rather than each one reimplementing the forced-subtitle rule.

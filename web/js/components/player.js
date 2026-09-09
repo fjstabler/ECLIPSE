@@ -161,10 +161,20 @@ class Player {
     this.buffer = el('div', { class: 'player__buffer', style: { width: '0%' } });
     this.knob = el('div', { class: 'player__knob', style: { left: '0%' } });
 
+    this.preview = el('div', { class: 'player__preview', hidden: true },
+      el('div', { class: 'player__preview-frame' }),
+      el('div', { class: 'player__preview-time' }, '0:00'));
+
     this.scrub = el(
       'div',
-      { class: 'player__scrub', onClick: (e) => this.seekFromEvent(e), onMousemove: (e) => this.hoverScrub(e) },
-      el('div', { class: 'player__track' }, this.buffer, this.played, this.chapterTicks(), this.knob)
+      {
+        class: 'player__scrub',
+        onClick: (e) => this.seekFromEvent(e),
+        onMousemove: (e) => { this.hoverScrub(e); this.showPreviewAtEvent(e); },
+        onMouseleave: () => this.hidePreview(),
+      },
+      el('div', { class: 'player__track' }, this.buffer, this.played, this.chapterTicks(), this.knob),
+      this.preview
     );
 
     this.volumeInput = el('input', {
@@ -470,6 +480,49 @@ class Player {
     this.seekFromEvent(e);
   }
 
+  // --- scrub previews ---------------------------------------------------
+
+  showPreviewAtEvent(e) {
+    const rect = this.scrub.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    this.showPreview(ratio * this.duration, ratio);
+  }
+
+  /**
+   * The frame nearest a given time, taken out of the sprite sheet by moving
+   * the background rather than loading anything — one image for the whole
+   * film, so dragging along the bar costs no requests at all.
+   */
+  showPreview(seconds, ratio) {
+    const tp = this.ctx?.trickplay;
+    if (!tp || !this.duration) return;
+
+    const index = Math.max(0, Math.min(tp.count - 1, Math.floor(seconds / tp.interval)));
+    const frame = this.preview.firstElementChild;
+    const col = index % tp.columns;
+    const row = Math.floor(index / tp.columns);
+
+    frame.style.width = `${tp.tileWidth}px`;
+    frame.style.height = `${tp.tileHeight}px`;
+    frame.style.backgroundImage = `url(${tp.url})`;
+    frame.style.backgroundSize = `${tp.tileWidth * tp.columns}px ${tp.tileHeight * tp.rows}px`;
+    frame.style.backgroundPosition = `-${col * tp.tileWidth}px -${row * tp.tileHeight}px`;
+
+    this.preview.lastElementChild.textContent = formatTime(seconds);
+    this.preview.hidden = false;
+
+    // Kept inside the scrub bar so it never hangs off the edge of the screen
+    // at the very start or end of a film.
+    const half = tp.tileWidth / 2;
+    const width = this.scrub.getBoundingClientRect().width;
+    const x = Math.max(half, Math.min(width - half, (ratio ?? seconds / this.duration) * width));
+    this.preview.style.left = `${x}px`;
+  }
+
+  hidePreview() {
+    if (this.preview) this.preview.hidden = true;
+  }
+
   seekTo(seconds) {
     const target = Math.max(0, Math.min(seconds, this.duration || seconds));
     if (this.mode === 'direct') {
@@ -482,7 +535,16 @@ class Player {
   }
 
   skip(delta) {
-    this.seekTo(this.currentTime + delta);
+    const target = Math.max(0, Math.min(this.currentTime + delta, this.duration || Infinity));
+    this.seekTo(target);
+
+    // A remote has no pointer to hover with, so the preview follows the
+    // seek instead: pressing right repeatedly to find a scene shows what you
+    // are skipping past rather than only where you land. It clears itself so
+    // it doesn't sit over the picture once you stop.
+    this.showPreview(target);
+    clearTimeout(this.previewTimer);
+    this.previewTimer = setTimeout(() => this.hidePreview(), 1600);
   }
 
   jumpChapter(direction) {
@@ -982,6 +1044,7 @@ class Player {
     api.stopped({ fileId: this.fileId, secondsWatched: this.watchedSeconds, completed: false }).catch(() => {});
     document.removeEventListener('keydown', this.keyHandler);
     clearTimeout(this.idleTimer);
+    clearTimeout(this.previewTimer);
     if (this.rafId) cancelAnimationFrame(this.rafId);
     this.closeTrackMenu();
     this.subtitleLayer.destroy();

@@ -384,3 +384,16 @@ CREATE TABLE IF NOT EXISTS scan_log (
   removed     INTEGER NOT NULL DEFAULT 0,
   errors      TEXT NOT NULL DEFAULT '[]'
 );
+
+-- Scrub preview thumbnails: one sprite sheet per media file, described here
+-- so the player knows how to slice it.
+CREATE TABLE IF NOT EXISTS trickplay (
+  media_file_id INTEGER PRIMARY KEY REFERENCES media_files(id) ON DELETE CASCADE,
+  interval      REAL NOT NULL,
+  columns       INTEGER NOT NULL,
+  rows          INTEGER NOT NULL,
+  tile_width    INTEGER NOT NULL,
+  tile_height   INTEGER NOT NULL,
+  count         INTEGER NOT NULL,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
