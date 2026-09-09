@@ -2,6 +2,7 @@ import { db } from './db.js';
 import {
   getAudioTracks, getSubtitleTracks, getChapters, getMarkers, technicalInfo, qualityLabel, versionLabel,
 } from './media/streams.js';
+import { getPreferences, pickTracks } from './preferences.js';
 
 export { getAudioTracks, getSubtitleTracks, technicalInfo };
 
@@ -193,6 +194,23 @@ function publicFile(f) {
   };
 }
 
+/**
+ * Where playback should actually start, given what was saved.
+ *
+ * A finished title resumes at the beginning, and so does one stopped in its
+ * last few seconds — otherwise pressing Play on something you watched to the
+ * end drops you at the end, where it immediately finishes and closes itself.
+ * From the sofa that looks exactly like the app crashing.
+ */
+function resumePosition(state, duration) {
+  if (!state) return 0;
+  if (state.completed) return 0;
+  const position = state.position || 0;
+  if (position < 5) return 0;
+  if (duration > 0 && (position >= duration - 10 || position / duration >= 0.97)) return 0;
+  return position;
+}
+
 /** Where should this user pick up? Next unwatched episode, or the film itself. */
 export function getResumeFor(userId, titleId) {
   const title = db.prepare('SELECT kind FROM titles WHERE id = ?').get(titleId);
@@ -209,11 +227,12 @@ export function getResumeFor(userId, titleId) {
       `)
       .get(userId, titleId);
     if (!row) return null;
+    const position = resumePosition(row, row.duration);
     return {
       fileId: row.file_id,
-      position: row.completed ? 0 : row.position || 0,
+      position,
       duration: row.duration,
-      label: row.position > 30 && !row.completed ? 'Resume' : 'Play',
+      label: position > 30 ? 'Resume' : 'Play',
     };
   }
 
@@ -232,14 +251,15 @@ export function getResumeFor(userId, titleId) {
     .get(userId, titleId);
 
   if (!next) return null;
+  const position = resumePosition(next, next.duration);
   return {
     fileId: next.file_id,
-    position: next.completed ? 0 : next.position,
+    position,
     duration: next.duration,
     season: next.season,
     episode: next.number,
     episodeName: next.name,
-    label: next.position > 30 && !next.completed ? 'Resume' : next.completed ? 'Play' : 'Play',
+    label: position > 30 ? 'Resume' : 'Play',
   };
 }
 
@@ -375,6 +395,10 @@ export function playbackContext(fileId, userId) {
     ? db.prepare('SELECT position, completed FROM playback_state WHERE user_id = ? AND media_file_id = ?').get(userId, fileId)
     : null;
 
+  const audioTracks = getAudioTracks(fileId);
+  const subtitles = getSubtitleTracks(fileId);
+  const preferences = userId ? getPreferences(userId) : null;
+
   return {
     file: publicFile(file),
     title,
@@ -383,13 +407,17 @@ export function playbackContext(fileId, userId) {
       : null,
     next,
     previous,
-    position: state?.position || 0,
-    audioTracks: getAudioTracks(fileId),
-    subtitles: getSubtitleTracks(fileId),
+    position: resumePosition(state, file.duration),
+    audioTracks,
+    subtitles,
     chapters: getChapters(fileId),
     markers: getMarkers(fileId),
     versions: getVersions(file, userId),
     technical: technicalInfo(file),
+    preferences,
+    // Worked out server-side so every client lands on the same track for the
+    // same file, rather than each one reimplementing the forced-subtitle rule.
+    defaults: preferences ? pickTracks(preferences, { audioTracks, subtitles }) : null,
   };
 }
 

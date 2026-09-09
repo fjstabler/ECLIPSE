@@ -231,6 +231,27 @@ CREATE TABLE IF NOT EXISTS taste_profiles (
   updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- How each viewer wants playback to behave. Separate from taste_profiles,
+-- which is what N.O.V.A. reads — these are settings, not preferences about
+-- what to watch.
+CREATE TABLE IF NOT EXISTS user_preferences (
+  user_id             INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  autoplay_next       INTEGER NOT NULL DEFAULT 1,
+  skip_intro          TEXT NOT NULL DEFAULT 'ask',    -- 'ask' | 'auto' | 'off'
+  skip_credits        TEXT NOT NULL DEFAULT 'ask',
+  audio_language      TEXT,                            -- preferred, when the file has it
+  subtitle_language   TEXT,
+  subtitles_default   INTEGER NOT NULL DEFAULT 0,
+  subtitle_size       INTEGER NOT NULL DEFAULT 100,    -- percent
+  subtitle_colour     TEXT NOT NULL DEFAULT '#ffffff',
+  subtitle_background REAL NOT NULL DEFAULT 0.55,      -- 0-1 opacity behind the text
+  subtitle_position   INTEGER NOT NULL DEFAULT 88,     -- percent down the frame
+  playback_speed      REAL NOT NULL DEFAULT 1.0,
+  max_height          INTEGER NOT NULL DEFAULT 0,      -- 0 = whatever the file is
+  max_bitrate         INTEGER NOT NULL DEFAULT 0,
+  updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- ---------------------------------------------------------------------------
 -- Watching
 -- ---------------------------------------------------------------------------

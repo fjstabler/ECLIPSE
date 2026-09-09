@@ -125,7 +125,7 @@ export function technicalInfo(file) {
   const video = streams.find((s) => s.kind === 'video');
 
   return {
-    container: file.container || file.extension?.replace('.', '') || null,
+    container: containerName(file),
     size: file.size,
     duration: file.duration,
     bitrate: file.bitrate,
@@ -181,6 +181,24 @@ export function technicalInfo(file) {
         isHearingImpaired: s.is_hearing_impaired === 1,
       })),
   };
+}
+
+/**
+ * ffprobe calls a .webm "matroska" because WebM is a Matroska subset — true,
+ * and not what anyone looking at a technical panel expects to read about the
+ * file they can see is called .webm.
+ */
+const CONTAINER_NAMES = {
+  matroska: 'Matroska', webm: 'WebM', mov: 'MP4', mp4: 'MP4', avi: 'AVI',
+  mpegts: 'MPEG-TS', asf: 'ASF', flv: 'FLV', ogg: 'Ogg',
+};
+
+function containerName(file) {
+  const ext = (file.extension || '').replace('.', '').toLowerCase();
+  if (ext === 'webm') return 'WebM';
+  if (ext === 'mkv') return 'Matroska';
+  const raw = (file.container || ext || '').toLowerCase();
+  return CONTAINER_NAMES[raw] || raw.toUpperCase() || null;
 }
 
 export function qualityLabel(height) {

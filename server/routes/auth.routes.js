@@ -8,6 +8,8 @@ import { getTasteProfile, saveTasteProfile } from '../nova/engine.js';
 import { novaAvailable } from '../nova/openai.js';
 import { hasTmdb } from '../metadata/tmdb.js';
 import { config } from '../config.js';
+import { getPreferences, savePreferences } from '../preferences.js';
+import { registerDevice } from '../media/sessions.js';
 
 export const router = express.Router();
 
@@ -93,4 +95,31 @@ router.put('/taste', requireAuth, (req, res) => {
     avoid: arr(req.body.avoid),
   });
   res.json(saved);
+});
+
+/** Playback settings — how this viewer wants the player to behave. */
+router.get('/preferences', requireAuth, (req, res) => {
+  res.json(getPreferences(req.user.id));
+});
+
+router.put('/preferences', requireAuth, (req, res) => {
+  // savePreferences clamps everything it's given, so the body goes straight
+  // in — a settings form can't push the player into an unusable state.
+  res.json(savePreferences(req.user.id, req.body || {}));
+});
+
+/**
+ * A client saying hello. It hands over the key it generated once and kept,
+ * so the household sees the same device on the list rather than a new row
+ * each time a user agent gains a version number.
+ */
+router.post('/device', requireAuth, (req, res) => {
+  const device = registerDevice({
+    userId: req.user.id,
+    deviceKey: req.body?.deviceKey || req.get('x-eclipse-device'),
+    userAgent: req.get('user-agent'),
+    clientName: req.body?.name,
+  });
+  if (!device) return res.status(400).json({ error: 'A device key is required' });
+  res.json({ id: device.id, name: device.name, kind: device.kind });
 });

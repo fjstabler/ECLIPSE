@@ -741,6 +741,61 @@ a.tv-cursor:not(.card), button.tv-cursor:not(.card), [tabindex].tv-cursor:not(.c
   background: var(--surface-3); outline: none;
 }
 .player__menu-item.is-active { color: var(--corona-1); font-weight: 600; }
+.player__menu-item { display: flex; align-items: baseline; gap: 12px; }
+.player__menu-label { flex: 1 1 auto; }
+.player__menu-hint { flex: 0 0 auto; font-size: 11.5px; color: var(--text-faint); }
+
+/* Chapter boundaries on the scrub bar — something to aim at, not just a
+   number in a menu. */
+.player__chapters { position: absolute; inset: 0; pointer-events: none; }
+.player__chapter-tick {
+  position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px;
+  background: rgba(255,255,255,0.55); border-radius: 1px;
+}
+
+/* Skip intro / skip credits. Sits clear of the controls so it never covers
+   the scrub bar, and stays reachable with a remote. */
+.player__skip { position: absolute; right: 34px; bottom: 132px; z-index: 20; }
+.player__skip-btn {
+  padding: 12px 22px; border-radius: var(--radius-full); cursor: pointer;
+  background: rgba(16,16,24,0.9); border: 1px solid var(--hairline-strong);
+  color: var(--text); font-size: 14px; font-weight: 600; letter-spacing: 0.01em;
+  animation: riseIn 0.24s var(--ease) both;
+}
+.player__skip-btn:hover, .player__skip-btn:focus-visible, .player__skip-btn.tv-cursor {
+  background: #fff; color: #0a0a0f; border-color: transparent; outline: none;
+}
+
+.player__next-label { margin: 0 0 4px; font-size: 11px; letter-spacing: 0.1em; color: var(--text-faint); }
+.player__next-title { margin: 0; font-size: 14px; font-weight: 600; }
+
+.player__error-title { font-size: 20px; margin: 0; }
+.player__error-detail { color: var(--text-faint); max-width: 460px; line-height: 1.6; margin: 0; }
+.player__error-actions { display: flex; gap: 10px; }
+
+/* Subtitles are drawn here rather than by the browser's own <track>
+   renderer — see components/subtitles.js for why. Everything a viewer can
+   change about them is a custom property, so a settings change is one
+   assignment rather than a re-render. */
+.subs {
+  position: absolute; inset: 0; z-index: 15;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+  padding: 0 8% calc(100% - var(--sub-position, 88%));
+  pointer-events: none; text-align: center;
+  --sub-size: 1; --sub-colour: #fff; --sub-bg: rgba(0,0,0,0.55); --sub-position: 88%;
+}
+.subs__cue {
+  display: inline-block; max-width: 100%;
+  margin: 0 auto 2px; padding: 0.15em 0.5em; border-radius: 4px;
+  background: var(--sub-bg); color: var(--sub-colour);
+  font-size: calc(clamp(16px, 2.6vw, 30px) * var(--sub-size));
+  line-height: 1.35; font-weight: 500;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+  text-wrap: balance;
+}
+.subs__cue--top { align-self: center; }
+/* The OSD sliding up must not land on top of the dialogue. */
+.player:not(.is-idle) .subs { padding-bottom: calc(100% - var(--sub-position, 88%) + 56px); }
 .player__loading {
   position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
   width: 46px; height: 46px; border-radius: 50%;

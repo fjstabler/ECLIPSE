@@ -1,9 +1,33 @@
 /** Thin wrapper over the ECLIPSE HTTP API. */
 
+/**
+ * A value this device generates once and keeps, so the server sees the same
+ * TV across restarts rather than a new one every time its user agent gains a
+ * version number. Storage being unavailable (private browsing, a locked-down
+ * WebView) is not worth failing over — the device just goes unrecognised.
+ */
+function deviceKey() {
+  try {
+    let key = localStorage.getItem('eclipse.device');
+    if (!key) {
+      key = (crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      localStorage.setItem('eclipse.device', key);
+    }
+    return key;
+  } catch {
+    return null;
+  }
+}
+
+export const DEVICE_KEY = deviceKey();
+
 async function request(method, url, body) {
+  const headers = body ? { 'Content-Type': 'application/json' } : {};
+  if (DEVICE_KEY) headers['x-eclipse-device'] = DEVICE_KEY;
+
   const res = await fetch(url, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : {},
+    headers,
     body: body ? JSON.stringify(body) : undefined,
     credentials: 'same-origin',
   });
@@ -49,11 +73,36 @@ export const api = {
   watchlist: () => request('GET', '/api/library/watchlist'),
   history: () => request('GET', '/api/library/history'),
 
+  preferences: () => request('GET', '/api/auth/preferences'),
+  savePreferences: (body) => request('PUT', '/api/auth/preferences', body),
+  registerDevice: (name) => request('POST', '/api/auth/device', { deviceKey: DEVICE_KEY, name }),
+
   // playback
   playbackContext: (fileId) => request('GET', `/api/stream/context/${fileId}`),
+  playbackDecision: (fileId) => request('GET', `/api/stream/decide/${fileId}`),
   progress: (body) => request('POST', '/api/playback/progress', body),
   stopped: (body) => request('POST', '/api/playback/stopped', body),
   setWatched: (fileId, watched) => request('POST', '/api/playback/watched', { fileId, watched }),
+
+  /**
+   * A subtitle track as WebVTT text. Not JSON, so it bypasses request() —
+   * and the error body genuinely matters here (a picture-based track says
+   * so rather than just failing).
+   */
+  subtitleTrack: async (fileId, trackId) => {
+    const res = await fetch(`/api/stream/subtitles/${fileId}/${encodeURIComponent(trackId)}`, {
+      credentials: 'same-origin',
+    });
+    if (!res.ok) {
+      let message = `That subtitle track could not be loaded (${res.status})`;
+      try {
+        const data = await res.json();
+        if (data?.error) message = data.error;
+      } catch { /* not json */ }
+      throw new Error(message);
+    }
+    return res.text();
+  },
 
   // nova
   novaStatus: () => request('GET', '/api/nova/status'),
