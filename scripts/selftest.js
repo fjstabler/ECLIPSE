@@ -82,6 +82,14 @@ const epCases = [
   ['Severance/Season 2/Severance.S02E03.Who.Is.Alive.1080p.ATVP.WEB-DL.mkv', 'Severance', 2, 3],
   ['The Office/Season 03/The Office - 3x05 - Initiation.avi', 'The Office', 3, 5],
   ['Doctor Who/Specials/Doctor Who - S00E01 - The Star Beast.mkv', 'Doctor Who', 0, 1],
+  // A season folder carrying the whole release name, which is how scene packs
+  // arrive. Without the season marker stripped off the series name, every
+  // season of a show becomes a separate series.
+  ['Mr.Robot.S01.1080p.BluRay.x265-GRP/Mr.Robot.S01E01.1080p.BluRay.x265-GRP.mkv', 'Mr Robot', 1, 1],
+  ['Mr.Robot.S04.1080p.WEB.x265-GRP/Mr.Robot.S04E03.1080p.WEB.x265-GRP.mkv', 'Mr Robot', 4, 3],
+  // A number in the name that isn't a season: it disagrees with the season
+  // actually parsed, so it stays.
+  ['Stranger Things 4/Season 1/Stranger.Things.4.S01E02.mkv', 'Stranger Things 4', 1, 2],
 ];
 for (const [input, series, season, episode] of epCases) {
   const r = parseEpisode(input);

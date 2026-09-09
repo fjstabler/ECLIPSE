@@ -184,6 +184,7 @@ export function parseEpisode(filePath, libraryRoot) {
   }
 
   const series = extractTitleYear(seriesRaw);
+  series.title = withoutSeasonSuffix(series.title, season);
 
   // Whatever follows the episode marker is usually the episode title. Strip the
   // leading separator first — otherwise the release-group rule reads "- Pilot"
@@ -204,6 +205,27 @@ export function parseEpisode(filePath, libraryRoot) {
     episodeEnd,
     episodeTitle,
   };
+}
+
+/**
+ * Drop a season marker left on the end of a series name.
+ *
+ * A season folder only counts as one when it is named exactly "Season 1" or
+ * "S01". Scene releases rarely oblige: "Mr.Robot.S01.1080p.BluRay.x265-GROUP"
+ * is a season folder by any reasonable reading, but the name survives noise
+ * stripping as "Mr Robot S01" — so every season of a show becomes a series of
+ * its own, and the library shows four Mr Robots instead of one.
+ *
+ * Only stripped when the number agrees with the season already worked out
+ * from the filename. That agreement is the whole safety of this: if a show is
+ * genuinely called something ending in a number, nothing lines up and the
+ * name is left alone.
+ */
+function withoutSeasonSuffix(title, season) {
+  if (!title || season === null) return title;
+  const m = /^(.*?)[\s._-]+(?:season|series|s)[\s._-]*(\d{1,3})$/i.exec(title);
+  if (!m || !m[1].trim()) return title;
+  return Number(m[2]) === season ? m[1].trim() : title;
 }
 
 /**
