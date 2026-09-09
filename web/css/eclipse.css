@@ -207,7 +207,12 @@ a.tv-cursor:not(.card), button.tv-cursor:not(.card), [tabindex].tv-cursor:not(.c
   position: relative; min-height: min(86vh, 760px);
   display: flex; align-items: flex-end;
   padding: 0 var(--gutter) clamp(40px, 7vw, 90px);
-  margin-bottom: -60px;
+  /* This used to pull the page up 60px so the first shelf slid under the
+     hero's fade. What it actually did was put the shelf's heading under the
+     scrim — 60px of overlap on a 24px line, so the first row on the screen
+     was the one row with no visible name, on every client. Depth isn't worth
+     a heading; the scrim gradient already does that job. */
+  margin-bottom: 0;
 }
 .hero__media { position: absolute; inset: 0; overflow: hidden; z-index: 0; }
 .hero__media img {
@@ -306,7 +311,11 @@ a.tv-cursor:not(.card), button.tv-cursor:not(.card), [tabindex].tv-cursor:not(.c
 .row:nth-child(4) { animation-delay: 0.15s; }
 .row:nth-child(5) { animation-delay: 0.2s; }
 .row:nth-child(n+6) { animation-delay: 0.25s; }
-.row__head { display: flex; align-items: baseline; gap: 12px; padding: 0 var(--gutter); margin-bottom: 14px; }
+/* Positioned so it sits above .row__track, which reaches up over this strip
+   with a negative top margin to give hover-scaled cards room to overflow.
+   That box is a scroll container, so it was swallowing every click over the
+   heading — "See all" looked like a link and did nothing at all. */
+.row__head { position: relative; z-index: 1; display: flex; align-items: baseline; gap: 12px; padding: 0 var(--gutter); margin-bottom: 14px; }
 .row__title { font-size: clamp(17px, 1.5vw, 21px); font-weight: 700; letter-spacing: -0.01em; margin: 0; }
 .row__title--nova { display: flex; align-items: center; gap: 9px; }
 .row__more { font-size: 13px; color: var(--text-faint); opacity: 0; transition: opacity 0.2s, color 0.2s; }
@@ -423,6 +432,12 @@ a.tv-cursor:not(.card), button.tv-cursor:not(.card), [tabindex].tv-cursor:not(.c
 .detail__back {
   position: absolute; top: calc(var(--nav-h) + 12px); left: var(--gutter); z-index: 4;
 }
+/* A remote already has a Back button, wired to the same thing (see
+   bindTvBack in app.js), so an on-screen one is a second way to do what the
+   hardware already does — and one more stop the D-pad has to pass through
+   to reach Play. display:none also takes it out of tvnav's candidates, so
+   the cursor never lands on it. */
+.tv-mode .detail__back { display: none; }
 .detail__grid { position: relative; z-index: 2; display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 48px; padding: 40px var(--gutter) 0; align-items: start; }
 @media (max-width: 900px) { .detail__grid { grid-template-columns: 1fr; gap: 28px; } }
 
@@ -999,7 +1014,6 @@ textarea.input { height: auto; min-height: 96px; padding: 12px 15px; line-height
   min-height: 50vh;
   padding-top: calc(var(--nav-h) + 16px);
   align-items: flex-end;
-  margin-bottom: -16px;
 }
 .tv-mode .hero__media img, .tv-mode .hero__body {
   animation: none; opacity: 1; transform: none;

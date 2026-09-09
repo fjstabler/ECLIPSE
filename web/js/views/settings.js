@@ -484,7 +484,7 @@ function AboutPanel() {
         // to confirm a server is actually running what was just pushed,
         // rather than guessing from symptoms whether a git pull + restart
         // happened. Read this back rather than re-describing what's broken.
-        el('div', { class: 'fact__v' }, '2026-09-09.3')),
+        el('div', { class: 'fact__v' }, '2026-09-09.4')),
       el('div', { class: 'fact' },
         el('div', { class: 'fact__k' }, 'KEYBOARD'),
         el('div', { class: 'fact__v' }, 'Space play/pause · ← → skip 10s · F fullscreen · M mute · C subtitles · / search · Esc close'))));
