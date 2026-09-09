@@ -23,6 +23,13 @@ const BROWSER_VIDEO = ['h264', 'vp8', 'vp9', 'av1'];
 const BROWSER_AUDIO = ['aac', 'mp3', 'opus', 'vorbis', 'flac'];
 
 /**
+ * Containers a browser can open on its own. Whether it can then decode what
+ * is inside is a separate question, answered per device just below — an mp4
+ * holding HEVC opens fine on a phone and not at all on an old laptop.
+ */
+const BROWSER_CONTAINERS = new Set(['.mp4', '.m4v', '.webm', '.ogv', '.mov']);
+
+/**
  * Hardware encoders worth trying, best first. Each is verified by actually
  * encoding a frame before it gets used — an encoder can be compiled into
  * ffmpeg and still fail on a machine with no such hardware, and finding that
@@ -113,11 +120,30 @@ export function decidePlayback(file, capabilities = {}, options = {}) {
   const supportedVideo = capabilities.videoCodecs?.length ? capabilities.videoCodecs : BROWSER_VIDEO;
   const supportedAudio = capabilities.audioCodecs?.length ? capabilities.audioCodecs : BROWSER_AUDIO;
 
-  const videoOk = !videoCodec || supportedVideo.includes(videoCodec);
-  const audioOk = !audioCodec || supportedAudio.includes(audioCodec);
-  const containerOk = file.direct_play === 1;
+  const codecOk = !videoCodec || supportedVideo.includes(videoCodec);
 
-  if (!videoOk) reasons.push(`${videoCodec.toUpperCase()} video is not supported by this device`);
+  /**
+   * Bit depth is its own question, and one worth asking. h264 High 10 is a
+   * profile no browser decodes even though plain h264 is universal, and a
+   * device claiming HEVC without Main 10 would choke on most modern encodes.
+   * Only a client that told us what it does at ten bits gets judged on it —
+   * otherwise the codec list stands on its own, exactly as before.
+   */
+  const deep = (file.bit_depth || 8) >= 10;
+  const deepOk = !deep
+    || !capabilities.videoCodecs?.length
+    || (capabilities.video10 || []).includes(videoCodec);
+
+  const videoOk = codecOk && deepOk;
+  const audioOk = !audioCodec || supportedAudio.includes(audioCodec);
+
+  // The container is a scan-time fact about the file; whether the codecs
+  // inside it play is the device question answered above. Keeping them apart
+  // is what lets an HEVC mp4 direct play on a phone that can decode it.
+  const containerOk = file.direct_play === 1 || BROWSER_CONTAINERS.has((file.extension || '').toLowerCase());
+
+  if (!codecOk) reasons.push(`${videoCodec.toUpperCase()} video is not supported by this device`);
+  else if (!deepOk) reasons.push(`10-bit ${videoCodec.toUpperCase()} is not supported by this device`);
   if (!audioOk) reasons.push(`${audioCodec.toUpperCase()} audio is not supported by this device`);
   if (!containerOk && videoOk && audioOk) reasons.push(`${(file.container || file.extension || '').replace('.', '')} containers need repackaging`);
 
@@ -154,6 +180,7 @@ export function decidePlayback(file, capabilities = {}, options = {}) {
 export async function buildArgs({ file, decision, startAt = 0, audioTrack = null, burnSubtitle = null }) {
   const hw = decision.needsVideoEncode ? await detectHardware() : { available: false };
   const args = ['-hide_banner', '-loglevel', 'error'];
+  const videoCodec = (file.video_codec || '').toLowerCase();
 
   // Seeking before -i lets ffmpeg jump straight to a keyframe instead of
   // decoding everything up to that point and throwing it away — except when
@@ -206,20 +233,33 @@ export async function buildArgs({ file, decision, startAt = 0, audioTrack = null
     }
   } else {
     args.push('-c:v', 'copy');
+    // HEVC in mp4 has two sample entries, and ffmpeg writes the wrong one by
+    // default: `hev1` allows parameter sets inside the stream, `hvc1` keeps
+    // them in the header. Safari — every iPhone and iPad — plays only hvc1
+    // and fails silently on the other, which turns the cheap remux this
+    // whole path exists for into a black screen.
+    if (videoCodec === 'hevc' || videoCodec === 'h265') args.push('-tag:v', 'hvc1');
   }
 
-  // Audio gets copied whenever the browser can decode it as-is. Re-encoding
+  // Audio gets copied whenever the device can decode it as-is. Re-encoding
   // an AAC 5.1 track down to stereo just to repackage the container throws
   // away the surround mix for no reason — the browser downmixes on playback
-  // if the output device needs it.
-  const audioCodec = (file.audio_codec || '').toLowerCase();
-  if (BROWSER_AUDIO.includes(audioCodec)) {
+  // if the output device needs it. The decision already worked out what this
+  // device handles, so it is not second-guessed here: a TV that plays AC-3
+  // keeps its AC-3.
+  if (!decision.needsAudioEncode) {
     args.push('-c:a', 'copy');
   } else {
     args.push('-c:a', 'aac', '-ac', '2', '-b:a', '192k');
   }
   args.push('-sn');
-  args.push('-movflags', 'frag_keyframe+empty_moov+default_base_moof', '-f', 'mp4', 'pipe:1');
+  // `delay_moov` holds the header back until the first packets have been
+  // parsed. Without it, copying an AC-3 or E-AC3 track through fails before a
+  // single byte is written — mp4 describes those codecs in a box built from
+  // the first packet, and `empty_moov` alone asks for the header too early
+  // ("Cannot write moov atom before EAC3 packets parsed"). It costs nothing
+  // on a pipe: the header still arrives ahead of the video.
+  args.push('-movflags', 'frag_keyframe+empty_moov+default_base_moof+delay_moov', '-f', 'mp4', 'pipe:1');
   return { args, hardware: hw };
 }
 

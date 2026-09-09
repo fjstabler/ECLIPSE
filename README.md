@@ -130,6 +130,20 @@ fly if **ffmpeg** is installed — copying the video stream where possible so it
 cheap enough to run on a NAS. If a direct play fails, the player falls back to
 the converted stream by itself.
 
+**It asks the device what it can decode.** Before playing anything, the client
+probes its own media engine and tells the server which codecs it handles, down
+to whether it manages them at ten bits per sample. That one detail decides
+whether an x265 library is cheap or ruinous: a phone or Fire Stick that decodes
+HEVC gets the file repackaged with the video stream copied byte for byte, while
+a laptop that doesn't gets a real re-encode. On the same file the copy costs
+around fifty times less CPU than the encode, which on a two-core box is the
+difference between instant playback and a stutter. Bit depth is asked separately
+because h264 High 10 looks universally supported and is decoded by nothing —
+a file like that is re-encoded even though plain h264 is on every device.
+
+Open the player's **Technical info** (`I`) to see which of the three happened
+and, when it isn't a direct play, the reason.
+
 ```bash
 # Debian/Ubuntu
 sudo apt install ffmpeg
@@ -175,6 +189,35 @@ every push:
 ```
 https://github.com/fjstabler/ECLIPSE/releases/download/firetv-latest/eclipse-firetv.apk
 ```
+
+---
+
+## iPhone and iPad
+
+No app, no App Store, no TestFlight. Open the server's address in **Safari**,
+tap **Share**, then **Add to Home Screen**.
+
+What you get is a real home-screen app: the ECLIPSE icon, no Safari address bar
+or toolbars, and the dark background behind the status bar rather than white.
+That comes from a web app manifest and the Apple-specific meta tags ECLIPSE
+serves — Safari ignores the standard `display` field and reads its own.
+
+Two things behave differently on iPhone than everywhere else, and both are
+handled:
+
+- **Fullscreen** is the system video player rather than the page, because iOS
+  has no element fullscreen on the phone. Tapping fullscreen hands over to it.
+- **Picture in picture** uses Apple's own presentation-mode API, so the button
+  appears on iOS as well.
+
+It must be Safari for the install itself — Chrome and Firefox on iOS can't add
+a web app to the home screen — but playback works in any of them.
+
+Worth knowing: iPhones decode HEVC in hardware, including 10-bit, so an x265
+library repackages rather than re-encodes (see [Playback](#playback)). Over
+mobile data a 1080p remux is still a 1080p remux — **Settings → Quality** caps
+resolution and bitrate for the profile, at the cost of making the server
+re-encode.
 
 ---
 

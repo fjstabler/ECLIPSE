@@ -367,6 +367,142 @@ console.log('\nmedia inspection');
   }
 }
 
+// --- device capabilities ----------------------------------------------------
+// A 10-bit HEVC library on a two-core server is the case that decides whether
+// ECLIPSE is usable at all: copied through it costs nothing, re-encoded it
+// pins the box. What follows proves the copy actually happens, and that it
+// produces something the device that asked for it will open.
+
+console.log('\ndevice capabilities');
+{
+  const { decidePlayback, buildArgs } = await import('../server/media/transcode.js');
+
+  // What a modern phone or TV reports: HEVC, and HEVC at ten bits.
+  const phone = { videoCodecs: ['h264', 'hevc'], video10: ['hevc'], audioCodecs: ['aac', 'ac3', 'eac3'] };
+  // An older laptop: h264 only, and nothing at ten bits.
+  const laptop = { videoCodecs: ['h264', 'vp9'], video10: [], audioCodecs: ['aac', 'mp3'] };
+
+  const mkv10 = {
+    video_codec: 'hevc', audio_codec: 'eac3', extension: '.mkv', direct_play: 0,
+    bit_depth: 10, height: 1080, path: '/nowhere.mkv',
+  };
+
+  check(
+    'a 10-bit HEVC mkv is repackaged, not re-encoded, for a device that decodes it',
+    decidePlayback(mkv10, phone, {}).method === 'remux',
+  );
+  check(
+    'the same file is re-encoded for a device that does not',
+    decidePlayback(mkv10, laptop, {}).method === 'transcode',
+  );
+
+  const mp4Hevc = { ...mkv10, extension: '.mp4', audio_codec: 'aac' };
+  check(
+    'an HEVC mp4 direct plays on a device that decodes it',
+    decidePlayback(mp4Hevc, phone, {}).method === 'direct',
+    // The stored flag says no, because the scanner decided before it knew
+    // who was watching. The container is what matters here.
+    `direct_play flag is ${mp4Hevc.direct_play}`,
+  );
+
+  // h264 High 10: the profile that looks universally supported and is not.
+  const high10 = { video_codec: 'h264', audio_codec: 'aac', extension: '.mp4', direct_play: 1, bit_depth: 10, height: 1080 };
+  check(
+    'h264 High 10 is re-encoded even though the device lists h264',
+    decidePlayback(high10, phone, {}).method === 'transcode',
+  );
+  check(
+    'a client that says nothing about bit depth is judged on codecs alone',
+    decidePlayback(high10, {}, {}).method === 'direct',
+  );
+
+  const remuxArgs = (await buildArgs({ file: mkv10, decision: decidePlayback(mkv10, phone, {}) })).args;
+  check('the repackage copies the video stream', remuxArgs.join(' ').includes('-c:v copy'));
+  check(
+    'HEVC is tagged hvc1 so Safari will open it',
+    remuxArgs.join(' ').includes('-tag:v hvc1'),
+    'hev1 is ffmpeg\'s default and iPhones refuse it',
+  );
+  check('audio the device decodes is copied too', remuxArgs.join(' ').includes('-c:a copy'));
+
+  const laptopArgs = (await buildArgs({ file: mkv10, decision: decidePlayback(mkv10, laptop, {}) })).args;
+  check('audio the device cannot decode becomes aac', laptopArgs.join(' ').includes('-c:a aac'));
+
+  // And the whole thing end to end: a real 10-bit HEVC file, run through the
+  // arguments the server would actually use, read back to prove the video was
+  // copied rather than re-encoded and carries the tag Safari needs.
+  const { spawnSync } = await import('node:child_process');
+  const os = await import('node:os');
+  const fsp = await import('node:fs');
+  const pathMod = await import('node:path');
+
+  const haveHevc = spawnSync('ffmpeg', ['-hide_banner', '-encoders'], { encoding: 'utf8' })
+    .stdout?.includes('libx265');
+
+  if (!haveHevc) {
+    console.log('  skip  ffmpeg has no HEVC encoder — the end-to-end repackage not checked');
+  } else {
+    const dir = fsp.mkdtempSync(pathMod.join(os.tmpdir(), 'eclipse-hevc-'));
+    const source = pathMod.join(dir, 'source.mkv');
+    const out = pathMod.join(dir, 'out.mp4');
+
+    const build = spawnSync('ffmpeg', [
+      '-y', '-loglevel', 'error',
+      '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=10:duration=2',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2',
+      '-c:v', 'libx265', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p10le',
+      // E-AC3 rather than AAC on purpose: it is what a Blu-ray rip actually
+      // carries, and it is the codec that exposed the header-ordering bug
+      // this section now guards.
+      '-c:a', 'eac3', source,
+    ], { stdio: 'ignore' });
+
+    if (build.status !== 0) {
+      check('build a 10-bit HEVC file to repackage', false, 'ffmpeg could not create the fixture');
+    } else {
+      const { probeFile } = await import('../server/media/probe.js');
+      const probed = await probeFile(source);
+      check('the fixture really is 10-bit HEVC', probed?.videoCodec === 'hevc' && probed?.bitDepth === 10,
+        `${probed?.videoCodec} ${probed?.bitDepth}-bit`);
+
+      const file = {
+        path: source, video_codec: probed.videoCodec, audio_codec: probed.audioCodec,
+        extension: '.mkv', direct_play: 0, bit_depth: probed.bitDepth, height: probed.height,
+      };
+      const decision = decidePlayback(file, phone, {});
+      const { args } = await buildArgs({ file, decision });
+
+      // buildArgs pipes to stdout; write it to a file so ffprobe can read it
+      // back the way a player would.
+      const run = spawnSync('ffmpeg', ['-y', ...args.slice(0, -1), out], { stdio: 'ignore' });
+      check('the repackage runs', run.status === 0, `ffmpeg exited ${run.status}`);
+
+      const back = spawnSync('ffprobe', [
+        '-v', 'error', '-select_streams', 'v:0',
+        '-show_entries', 'stream=codec_name,codec_tag_string,bits_per_raw_sample,pix_fmt',
+        '-of', 'default=nw=1:nk=1', out,
+      ], { encoding: 'utf8' });
+      const fields = (back.stdout || '').trim().split('\n').map((s) => s.trim());
+
+      check('the video came through untouched as HEVC', fields[0] === 'hevc', fields.join(' '));
+      check('and is tagged hvc1 in the mp4', fields[1] === 'hvc1', fields[1]);
+      check('and is still 10-bit', fields.some((f) => f.includes('10')), fields.join(' '));
+
+      // The surround track has to survive too. Repackaging E-AC3 into a
+      // fragmented mp4 is the case that fails outright if the mp4 header is
+      // written before the first packet has been read.
+      const audioBack = spawnSync('ffprobe', [
+        '-v', 'error', '-select_streams', 'a:0',
+        '-show_entries', 'stream=codec_name', '-of', 'default=nw=1:nk=1', out,
+      ], { encoding: 'utf8' });
+      check('the surround track is repackaged, not downmixed to stereo',
+        (audioBack.stdout || '').trim() === 'eac3', (audioBack.stdout || '').trim() || 'no audio stream');
+    }
+
+    fsp.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 // --- scrub previews ---------------------------------------------------------
 // The sprite sheet is only useful if the player can find the right tile in
 // it, which is arithmetic that has to agree on both sides.

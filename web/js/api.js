@@ -1,5 +1,7 @@
 /** Thin wrapper over the ECLIPSE HTTP API. */
 
+import { capabilityQuery } from './capabilities.js';
+
 /**
  * A value this device generates once and keeps, so the server sees the same
  * TV across restarts rather than a new one every time its user agent gains a
@@ -79,8 +81,10 @@ export const api = {
   setPin: (pin) => request('PUT', '/api/auth/pin', { pin }),
 
   // playback
-  playbackContext: (fileId) => request('GET', `/api/stream/context/${fileId}`),
-  playbackDecision: (fileId) => request('GET', `/api/stream/decide/${fileId}`),
+  // Both carry what this device can decode, so the server answers for the
+  // hardware in front of the viewer rather than for a lowest-common browser.
+  playbackContext: (fileId) => request('GET', `/api/stream/context/${fileId}?${capabilityQuery()}`),
+  playbackDecision: (fileId) => request('GET', `/api/stream/decide/${fileId}?${capabilityQuery()}`),
   progress: (body) => request('POST', '/api/playback/progress', body),
   stopped: (body) => request('POST', '/api/playback/stopped', body),
   setWatched: (fileId, watched) => request('POST', '/api/playback/watched', { fileId, watched }),

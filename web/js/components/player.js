@@ -1,6 +1,7 @@
 import { el, icon, clear, formatTime, formatBytes, toast } from '../ui.js';
 import { api } from '../api.js';
 import { focusFirstIn, focusElement } from '../tvnav.js';
+import { capabilityParams } from '../capabilities.js';
 import { parseVtt, SubtitleLayer } from './subtitles.js';
 
 // Set once, synchronously, before this module (or any other) ever runs —
@@ -125,7 +126,11 @@ class Player {
       // The stream starts at the requested offset, so the element's own clock
       // begins at zero and the offset is added back when displaying time.
       this.transcodeOffset = position;
-      const params = new URLSearchParams({ t: String(Math.floor(position)) });
+      // Starting from what this device can decode means a codec the browser
+      // handles natively gets repackaged rather than re-encoded — the whole
+      // difference between an idle server and a pinned one.
+      const params = capabilityParams();
+      params.set('t', String(Math.floor(position)));
       if (this.audioTrackIndex != null) params.set('audio', String(this.audioTrackIndex));
       if (this.burnSubtitle != null) params.set('burn', String(this.burnSubtitle));
       if (this.forceFullEncode) params.set('mode', 'full');
@@ -220,7 +225,13 @@ class Player {
 
     // Picture-in-picture only exists on some browsers, and never inside the
     // Fire TV WebView — a button that does nothing is worse than no button.
-    const pipSupported = document.pictureInPictureEnabled && !TV_MODE;
+    // Safari has picture-in-picture but not the standard flag for it, so
+    // checking only the standard one hid the button on every iPhone and iPad
+    // — devices where PiP is arguably most useful.
+    const pipSupported = !TV_MODE && (
+      document.pictureInPictureEnabled ||
+      (this.video.webkitSupportsPresentationMode && typeof this.video.webkitSetPresentationMode === 'function')
+    );
     this.pipBtn = pipSupported
       ? el('button', { class: 'pbtn', type: 'button', title: 'Picture in picture', 'aria-label': 'Picture in picture', onClick: () => this.togglePip() }, icon('pip'))
       : null;
@@ -576,12 +587,33 @@ class Player {
   }
 
   async toggleFullscreen() {
+    // Safari answers to its own spelling of all of this, so "are we
+    // fullscreen" has two answers to check rather than one.
+    const current = () => document.fullscreenElement || document.webkitFullscreenElement || null;
     try {
-      if (document.fullscreenElement) await document.exitFullscreen();
-      else await this.root.requestFullscreen();
+      if (current()) {
+        if (document.exitFullscreen) await document.exitFullscreen();
+        else document.webkitExitFullscreen();
+      } else if (this.root.requestFullscreen) {
+        await this.root.requestFullscreen();
+      } else if (this.root.webkitRequestFullscreen) {
+        // Mac and iPad Safari: the page element can go fullscreen, so the
+        // custom controls survive.
+        this.root.webkitRequestFullscreen();
+      } else if (this.video.webkitEnterFullscreen) {
+        // An iPhone has no Fullscreen API for ordinary elements — only the
+        // video itself can go fullscreen, into Safari's own player. So the
+        // custom controls go away for the duration, which is the trade: the
+        // alternative on that device is a button that does nothing at all.
+        this.video.webkitEnterFullscreen();
+        return;
+      } else {
+        toast('This browser cannot go fullscreen');
+        return;
+      }
       clear(this.fsBtn);
-      this.fsBtn.append(icon(document.fullscreenElement ? 'exitFullscreen' : 'fullscreen'));
-      this.fsBtn.setAttribute('aria-label', document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen');
+      this.fsBtn.append(icon(current() ? 'exitFullscreen' : 'fullscreen'));
+      this.fsBtn.setAttribute('aria-label', current() ? 'Exit fullscreen' : 'Fullscreen');
     } catch {
       toast('Fullscreen was blocked by the browser');
     }
@@ -589,8 +621,18 @@ class Player {
 
   async togglePip() {
     try {
-      if (document.pictureInPictureElement) await document.exitPictureInPicture();
-      else await this.video.requestPictureInPicture();
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else if (this.video.requestPictureInPicture) {
+        await this.video.requestPictureInPicture();
+      } else if (this.video.webkitSetPresentationMode) {
+        // Safari's own spelling of the same idea, and the only one an iPhone
+        // or an older Mac Safari answers to.
+        const mode = this.video.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture';
+        this.video.webkitSetPresentationMode(mode);
+      } else {
+        toast('Picture in picture is not available on this device');
+      }
     } catch {
       toast('Picture in picture is not available for this video');
     }
@@ -787,13 +829,25 @@ class Player {
   showTechnical() {
     const t = this.ctx.technical;
     if (!t) return;
+
+    // What the server decided for this device, not a guess from which URL was
+    // picked — and the reason with it, because "Converting" on a phone that
+    // should have direct played is the single most useful thing to be able to
+    // read off a screen.
+    const decided = this.ctx.playback || {};
+    const via = this.mode === 'direct'
+      ? 'Direct play'
+      : this.forceFullEncode || decided.method === 'transcode' ? 'Converting' : 'Repackaging';
+    const why = via === 'Direct play' ? null : decided.reasons?.join('. ');
+
     const rows = [
       ['Container', t.container],
       ['Video', [t.video?.codec?.toUpperCase(), t.video?.resolution, t.video?.frameRate ? `${t.video.frameRate}fps` : null, t.video?.bitDepth ? `${t.video.bitDepth}-bit` : null].filter(Boolean).join(' · ')],
       ['HDR', t.video?.hdrFormat],
       ['Audio', t.audio?.map((a) => [a.languageName || a.label, a.codec?.toUpperCase(), a.channelLabel].filter(Boolean).join(' ')).join(', ')],
       ['Subtitles', t.subtitles?.length ? t.subtitles.map((s) => `${s.languageName || s.label} (${s.format})`).join(', ') : 'None'],
-      ['Playing via', this.mode === 'direct' ? 'Direct play' : this.forceFullEncode ? 'Transcoding' : 'Remuxing'],
+      ['Playing via', via],
+      ['Because', why],
       ['Size', t.size ? formatBytes(t.size) : null],
     ].filter(([, v]) => v);
 
@@ -1007,7 +1061,9 @@ class Player {
         case 'a': if (!this.audioBtn.hidden) this.openAudioMenu(this.audioBtn); break;
         case '<': this.setSpeed(SPEEDS[Math.max(0, SPEEDS.indexOf(this.speed) - 1)]); break;
         case '>': this.setSpeed(SPEEDS[Math.min(SPEEDS.length - 1, SPEEDS.indexOf(this.speed) + 1)]); break;
-        case 'Escape': if (!document.fullscreenElement) closePlayer(); break;
+        // Escape leaves fullscreen rather than the player when we are in it,
+        // and Safari reports that under its own property name.
+        case 'Escape': if (!document.fullscreenElement && !document.webkitFullscreenElement) closePlayer(); break;
         default: break;
       }
     };
@@ -1055,6 +1111,7 @@ class Player {
     this.video.load();
     if (document.pictureInPictureElement) document.exitPictureInPicture().catch(() => {});
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    else if (document.webkitFullscreenElement) document.webkitExitFullscreen?.();
     this.root.remove();
     document.body.classList.remove('is-locked');
 

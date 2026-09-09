@@ -34,12 +34,28 @@ const MIME_TYPES = {
 
 /** Playback metadata: what to play, what can be switched, and what follows. */
 router.get('/context/:fileId', requireAuth, requirePermittedFile, (req, res) => {
-  const ctx = playbackContext(Number(req.params.fileId), req.user.id);
+  const fileId = Number(req.params.fileId);
+  const ctx = playbackContext(fileId, req.user.id);
   if (!ctx) return res.status(404).json({ error: 'That file is not in the library' });
+
+  // `direct_play` as stored is a scan-time guess made without knowing who
+  // would eventually watch. Answer it here instead, for the device actually
+  // asking — an HEVC mp4 is a direct play on a phone and a re-encode on a
+  // laptop, and the player picks its URL from this.
+  const capabilities = parseCapabilities(req.query);
+  const file = getMediaFile(fileId);
+  const decision = decidePlayback(file, capabilities, serverLimits());
+  ctx.playback = { method: decision.method, reasons: decision.reasons };
+  ctx.file.directPlay = decision.method === 'direct';
+  for (const version of ctx.versions || []) {
+    const row = version.id === fileId ? file : getMediaFile(version.id);
+    if (row) version.directPlay = decidePlayback(row, capabilities, serverLimits()).method === 'direct';
+  }
+
   // Somebody is about to watch this, so it's worth having scrub previews for
   // it. Returns whatever exists now and queues the work if there is none —
   // never blocks the play button on a convenience.
-  ensureTrickplay(getMediaFile(Number(req.params.fileId)));
+  ensureTrickplay(file);
   res.json(ctx);
 });
 
@@ -175,8 +191,12 @@ router.get('/transcode/:fileId', requireAuth, requirePermittedFile, async (req, 
     ...(req.query.mode === 'full' ? { forceEncode: true } : {}),
   });
   if (req.query.mode === 'full') {
+    // The player only asks for this after the cheap path already failed, so
+    // everything the device claimed is now suspect. Encode both streams to
+    // the one combination nothing refuses.
     decision.method = 'transcode';
     decision.needsVideoEncode = true;
+    decision.needsAudioEncode = true;
   }
 
   // Encodes are the expensive kind. Refusing a fourth one plainly is better
@@ -276,6 +296,9 @@ function parseCapabilities(query) {
   const list = (v) => (typeof v === 'string' && v ? v.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean) : []);
   return {
     videoCodecs: list(query.video),
+    // The subset of those it can also decode at ten bits per sample, which
+    // is not the same list — see decidePlayback.
+    video10: list(query.video10),
     audioCodecs: list(query.audio_codecs),
     maxHeight: Number(query.maxHeight) || 0,
     maxBitrate: Number(query.maxBitrate) || 0,
