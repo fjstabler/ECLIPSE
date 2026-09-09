@@ -27,8 +27,15 @@ Before starting it, open the container's **Options** tab and:
 
 - Set **Start at boot** to Yes — this is what makes it come back after a
   Proxmox host reboot.
-- Set **Features → Nesting** to enabled. Docker needs this to run inside an
-  LXC container at all; without it the Docker daemon fails to start.
+- Set **Features → Nesting** *and* **keyctl** to enabled. Docker needs both
+  to run inside an unprivileged LXC container: without nesting the daemon
+  won't start at all, and without keyctl it starts but containers fail with
+  keyring errors. If the Features tab won't let you tick them, run this on
+  the *Proxmox host* instead, with the container stopped:
+
+  ```bash
+  pct set <ctid> --features nesting=1,keyctl=1
+  ```
 
 Start the container, then open its console (or SSH in).
 
@@ -65,17 +72,24 @@ get your library reachable from inside this container, do that first.
 
 ```bash
 apt install -y git
+mkdir -p /opt/eclipse && cd /opt/eclipse
 git clone https://github.com/fjstabler/ECLIPSE.git
 cd ECLIPSE
 cp .env.example .env
 nano .env   # fill in ECLIPSE_MOVIES_DIR, ECLIPSE_SERIES_DIR, and your API keys
 ```
 
-Both `ECLIPSE_MOVIES_DIR` and `ECLIPSE_SERIES_DIR` need to be set to real
-paths that exist, even if one is just an empty folder for now (`mkdir -p
-/mnt/series` and point it there) — unlike the bare-metal setup, Docker
-Compose needs somewhere real to bind-mount, so leaving one blank will fail
-the next step rather than just skipping that library.
+In the Docker setup those two paths mean something slightly different from
+the bare-metal one: they are the paths **on this container's filesystem**
+that get bind-mounted into the image, not the paths ECLIPSE reads. Compose
+mounts them at `/media/movies` and `/media/series` inside, and points
+ECLIPSE there. You don't need to think about that — just give it real paths
+to your media.
+
+Both need to be set to folders that actually exist, even if one is empty for
+now (`mkdir -p /mnt/series` and point it there). Docker Compose needs
+somewhere real to bind-mount, so leaving one blank fails the next step
+rather than quietly skipping that library.
 
 ```bash
 docker compose up -d --build
@@ -151,6 +165,20 @@ snapshot including the write-ahead log while the server keeps serving.
   `ECLIPSE_SCAN_INTERVAL_HOURS` (6 by default), so files added from another
   machine turn up on their own. Lower it if you want them sooner, or rescan
   on demand from Settings → Library.
+- **Getting your media into an unprivileged container.** Bind-mounting a
+  host folder is done from the *Proxmox host*, with the container stopped:
+
+  ```bash
+  pct set <ctid> -mp0 /mnt/tank/media,mp=/mnt/media
+  ```
+
+  In an unprivileged container root is host UID 100000, so the host folder
+  has to be readable by that mapped user or ECLIPSE will scan it and find
+  nothing. The quickest fix is to make the media world-readable on the host
+  (`chmod -R a+rX /mnt/tank/media`); the tidier one is to map a UID in
+  `/etc/pve/lxc/<ctid>.conf`. A library that scans clean but comes back
+  empty is nearly always this rather than anything in ECLIPSE — check with
+  `ls /mnt/media` *inside* the container before looking further.
 - **Multiple library folders.** If `ECLIPSE_MOVIES_DIR` or
   `ECLIPSE_SERIES_DIR` lists more than one `:`-separated path, only the
   first is bind-mounted by the compose file as shipped — add another
