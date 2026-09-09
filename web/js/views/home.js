@@ -3,11 +3,21 @@ import { api } from '../api.js';
 import { Row } from '../components/row.js';
 import { openPlayer } from '../components/player.js';
 import { navigate } from '../router.js';
+import { ErrorState } from '../components/states.js';
 
 export async function HomeView({ outlet }) {
   outlet.append(skeleton());
 
-  const data = await api.home();
+  let data;
+  try {
+    data = await api.home();
+  } catch (err) {
+    // Home is where a TV lands on wake, so this is the screen most likely to
+    // meet a server that isn't up yet. Retrying in place beats sending the
+    // viewer back to a router-level error for the page they were already on.
+    outlet.replaceChildren(ErrorState(err, { retry: () => { outlet.replaceChildren(); HomeView({ outlet }); } }));
+    return;
+  }
   outlet.replaceChildren();
 
   if (!data.rows.length) {
@@ -109,7 +119,7 @@ function emptyLibrary() {
       el(
         'p',
         {},
-        'Point ECLIPSE at a folder of films or series and it will pick them up automatically — the same way Jellyfin does. ',
+        'Point ECLIPSE at a folder of films or series and it will pick them up automatically. ',
         'Set ',
         el('code', {}, 'ECLIPSE_MOVIES_DIR'),
         ' and ',

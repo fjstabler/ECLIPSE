@@ -5,12 +5,26 @@ import { Row } from '../components/row.js';
 import { openPlayer } from '../components/player.js';
 import { openNova } from '../components/nova.js';
 import { navigate } from '../router.js';
+import { ErrorState } from '../components/states.js';
 import { focusFirstIn } from '../tvnav.js';
 
 const TV_MODE = document.documentElement.classList.contains('tv-mode');
 
 export async function TitleView({ params, outlet }) {
-  const title = await api.title(Number(params.id));
+  let title;
+  try {
+    title = await api.title(Number(params.id));
+  } catch (err) {
+    // A 403 here is a parental limit and a 404 is a title that has left the
+    // library — both are ordinary answers, not crashes, and both want a way
+    // back rather than a stack trace.
+    outlet.replaceChildren(el('div', { class: 'page page--padded' },
+      ErrorState(err, {
+        retry: err.status === 403 ? null : () => { outlet.replaceChildren(); TitleView({ params, outlet }); },
+        home: true,
+      })));
+    return;
+  }
 
   const meta = [];
   if (title.year) meta.push(el('span', {}, String(title.year)));

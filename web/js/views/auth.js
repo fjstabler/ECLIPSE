@@ -1,5 +1,6 @@
 import { el, clear } from '../ui.js';
 import { api } from '../api.js';
+import { isOffline } from '../components/states.js';
 import { state } from '../state.js';
 
 /**
@@ -64,7 +65,11 @@ export function AuthView({ onSignedIn }) {
         state.user = res.user;
         onSignedIn(res.user);
       } catch (err) {
-        errorBox.textContent = err.message;
+        // A wrong password and an unreachable server both land here, and
+        // they call for completely different things from the person typing.
+        errorBox.textContent = isOffline(err)
+          ? 'Cannot reach the server. Check ECLIPSE is running and this device is on the same network.'
+          : err.message;
         errorBox.style.display = '';
         password.value = '';
         password.focus();

@@ -2,6 +2,7 @@ import { el } from '../ui.js';
 import { api } from '../api.js';
 import { Card } from '../components/card.js';
 import { navigate, currentPath } from '../router.js';
+import { ErrorState, EmptyState, gridSkeleton } from '../components/states.js';
 
 /** Films / Series / My list — a filterable grid. */
 export async function BrowseView({ query, outlet }) {
@@ -41,38 +42,49 @@ export async function BrowseView({ query, outlet }) {
   outlet.append(el('div', { class: 'page page--padded' }, toolbar, grid));
 
   if (!isList) {
+    // The grid is the page; a genre list that doesn't arrive costs the
+    // viewer one filter, not the whole screen, so it fails quietly.
     api.genres().then(({ genres }) => {
       for (const g of genres) {
         const opt = el('option', { value: g.name }, `${g.name} (${g.count})`);
         genreSelect.append(opt);
       }
       genreSelect.value = state.genre;
-    });
+    }).catch(() => { genreSelect.disabled = true; });
   }
 
   async function load() {
-    grid.replaceChildren(
-      ...Array.from({ length: 12 }, () => el('div', { class: 'skeleton', style: { aspectRatio: '2/3' } }))
-    );
+    grid.replaceChildren(...gridSkeleton(12));
 
-    const data = isList
-      ? await api.watchlist()
-      : await api.titles({
-          kind: state.kind || '',
-          genre: state.genre || '',
-          sort: state.sort,
-          limit: 200,
-        });
+    let data;
+    try {
+      data = isList
+        ? await api.watchlist()
+        : await api.titles({
+            kind: state.kind || '',
+            genre: state.genre || '',
+            sort: state.sort,
+            limit: 200,
+          });
+    } catch (err) {
+      // Without this the skeletons simply stayed forever, which reads as a
+      // library that is still thinking rather than a server that is gone.
+      grid.replaceChildren(el('div', { style: { gridColumn: '1 / -1' } },
+        ErrorState(err, { retry: () => load(), home: true })));
+      return;
+    }
 
     grid.replaceChildren();
 
     if (!data.items.length) {
-      grid.append(el('div', { class: 'empty', style: { gridColumn: '1 / -1' } },
-        el('h2', {}, isList ? 'Your list is empty' : 'Nothing here yet'),
-        el('p', {}, isList
-          ? 'Add titles from any detail page and they will wait for you here.'
-          : 'Try a different filter, or add more media to your library folders.'),
-        el('button', { class: 'btn btn--ghost', type: 'button', onClick: () => navigate('/') }, 'Back to home')));
+      grid.append(el('div', { style: { gridColumn: '1 / -1' } },
+        EmptyState(
+          isList ? 'Your list is empty' : 'Nothing here yet',
+          isList
+            ? 'Add titles from any detail page and they will wait for you here.'
+            : 'Try a different filter, or add more media to your library folders.',
+          { label: 'Back to home', onClick: () => navigate('/') }
+        )));
       return;
     }
 

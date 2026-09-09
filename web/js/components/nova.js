@@ -1,4 +1,5 @@
 import { el, icon, clear, miniMarkdown } from '../ui.js';
+import { isOffline } from './states.js';
 import { api, novaChat } from '../api.js';
 import { Card } from './card.js';
 
@@ -238,7 +239,10 @@ async function send() {
   } catch (err) {
     cancelRender();
     toolLine.remove();
-    bubble.textContent = `N.O.V.A. could not reply: ${err.message}`;
+    // "Failed to fetch" tells a viewer nothing they can act on.
+    bubble.textContent = isOffline(err)
+      ? 'N.O.V.A. could not reach the server. Check it is running and this device is on the same network.'
+      : `N.O.V.A. could not reply: ${err.message}`;
   } finally {
     cancelRender();
     toolLine.remove();

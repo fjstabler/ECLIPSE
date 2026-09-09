@@ -2,6 +2,7 @@ import { el, initials, icon } from '../ui.js';
 import { api } from '../api.js';
 import { Card } from '../components/card.js';
 import { navigate } from '../router.js';
+import { ErrorState, EmptyState } from '../components/states.js';
 
 const ROLE_LABELS = {
   cast: 'Actor', director: 'Director', creator: 'Creator', writer: 'Writer',
@@ -19,15 +20,16 @@ export async function PersonView({ params, outlet }) {
   try {
     person = await api.person(name);
   } catch (err) {
-    outlet.append(
-      el('div', { class: 'page page--padded' },
-        el('div', { class: 'empty' },
-          el('h2', {}, err.status === 404 ? 'Not in this library' : 'That did not load'),
-          el('p', {}, err.status === 404
-            ? `Nothing on this server credits ${name}.`
-            : err.message),
-          el('button', { class: 'btn btn--ghost', type: 'button', onClick: () => navigate('/') }, 'Back to home')))
-    );
+    // "Nobody by that name" is worth saying in those words rather than as a
+    // generic 404, since the name is the whole of what was asked for.
+    outlet.append(el('div', { class: 'page page--padded' },
+      err.status === 404
+        ? EmptyState('Not in this library', `Nothing on this server credits ${name}.`,
+            { label: 'Back to home', onClick: () => navigate('/') })
+        : ErrorState(err, {
+            retry: () => { outlet.replaceChildren(); PersonView({ params, outlet }); },
+            home: true,
+          })));
     return;
   }
 

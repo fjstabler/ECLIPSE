@@ -65,7 +65,7 @@ export async function render() {
       if (typeof cleanup === 'function') currentCleanup = cleanup;
     } catch (err) {
       console.error('[route]', err);
-      outlet.replaceChildren(errorView(err));
+      showError(err, outlet);
     }
     // A row-to-row glide left running from the outgoing page would otherwise
     // fight this for a frame or two, since it keeps calling scrollTo itself.
@@ -77,11 +77,13 @@ export async function render() {
   navigate('/', { replace: true });
 }
 
-function errorView(err) {
-  const wrap = document.createElement('div');
-  wrap.className = 'empty';
-  wrap.innerHTML = `<h2>That didn't load</h2><p>${err.message}</p>`;
-  return wrap;
+/**
+ * Imported lazily because states.js imports navigate() from this module, and
+ * a view only ever needs this once something has already gone wrong.
+ */
+async function showError(err, outlet) {
+  const { ErrorState } = await import('./components/states.js');
+  outlet.replaceChildren(ErrorState(err, { retry: () => render(), home: true }));
 }
 
 window.addEventListener('hashchange', render);

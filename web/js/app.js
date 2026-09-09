@@ -11,7 +11,9 @@ import { AuthView } from './views/auth.js';
 import { openSearch, closeSearch, isSearchOpen } from './views/search.js';
 import { toggleNova, openNova, closeNova, isNovaOpen } from './components/nova.js';
 import { closePlayer, closeActiveTrackMenu } from './components/player.js';
-import { initTvNav } from './tvnav.js';
+import { initTvNav, focusFirstIn } from './tvnav.js';
+
+const TV_MODE = document.documentElement.classList.contains('tv-mode');
 
 const app = document.getElementById('app');
 
@@ -20,11 +22,24 @@ async function boot() {
   try {
     info = await api.me();
   } catch {
+    // A Fire TV remote has no address bar and no refresh button, so telling
+    // someone to refresh is telling them to go and find a different device.
+    // It also retries by itself: the usual reason for landing here is a
+    // server that is up a few seconds after the TV is.
+    let waiting = false;
+    const tryAgain = el('button', {
+      class: 'btn btn--play', type: 'button',
+      onClick: () => { if (!waiting) { waiting = true; boot(); } },
+    }, 'Try again');
+
     clear(app).append(
       el('div', { class: 'empty', style: { paddingTop: '25vh' } },
         el('h2', {}, 'Cannot reach the ECLIPSE server'),
-        el('p', {}, 'The server may still be starting up. Refresh in a moment.'))
+        el('p', {}, 'ECLIPSE is not responding. It may still be starting up — check the server is running and this device is on the same network.'),
+        el('div', { class: 'empty__actions' }, tryAgain))
     );
+    if (TV_MODE) focusFirstIn(app);
+    setTimeout(() => { if (!waiting && app.contains(tryAgain)) boot(); }, 5000);
     return;
   }
 

@@ -1,4 +1,5 @@
 import { el, clear, icon, formatBytes, toast } from '../ui.js';
+import { ErrorState } from '../components/states.js';
 import { api } from '../api.js';
 import { state } from '../state.js';
 
@@ -800,15 +801,13 @@ function sliderRow(label, value, min, max, step, onChange, format) {
       readout));
 }
 
-/** Whatever went wrong, said plainly, with the one button that might help. */
+/**
+ * Whatever went wrong, said plainly, with the one button that might help.
+ * The shared component in its compact form — a settings panel is one card on
+ * a page, not the whole screen.
+ */
 function panelError(err, retry) {
-  const offline = !navigator.onLine || /failed to fetch|networkerror/i.test(err?.message || '');
-  return el('div', { class: 'panel-error' },
-    el('h3', {}, offline ? 'Cannot reach the server' : 'That did not load'),
-    el('p', {}, offline
-      ? 'ECLIPSE is not responding. Check the server is running and this device is on the same network.'
-      : err?.message || 'Something went wrong.'),
-    retry ? el('button', { class: 'btn btn--ghost btn--sm', type: 'button', onClick: () => retry() }, 'Try again') : null);
+  return ErrorState(err, { retry, compact: true });
 }
 
 function debounce(fn, ms) {

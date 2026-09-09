@@ -1,5 +1,6 @@
 import { el, icon, clear, initials } from '../ui.js';
 import { api } from '../api.js';
+import { ErrorState } from '../components/states.js';
 import { Card } from '../components/card.js';
 
 /** Full-screen search overlay, opened with the toolbar button or "/". */
@@ -43,9 +44,7 @@ export function openSearch() {
     try {
       data = await api.search(q);
     } catch (err) {
-      clear(results).append(el('div', { class: 'empty' },
-        el('h2', {}, 'Search is not responding'),
-        el('p', {}, err.message || 'The server did not answer. Check it is still running.')));
+      clear(results).append(ErrorState(err, { retry: () => run(q) }));
       return;
     }
     // A slower earlier request must not overwrite a newer one's results.

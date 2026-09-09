@@ -1,4 +1,4 @@
-import { el, icon, formatRuntime } from '../ui.js';
+import { el, icon, formatRuntime, initials } from '../ui.js';
 import { navigate } from '../router.js';
 import { openPlayer } from './player.js';
 
@@ -36,13 +36,22 @@ export function Card(title, { variant = 'poster', showReason = false } = {}) {
     },
     el(
       'div',
-      { class: 'card__art' },
+      { class: 'card__art', dataset: { initials: initials(title.title) } },
       el('img', {
         src: art || '',
         alt: '',
         loading: 'lazy',
         decoding: 'async',
-        onError: (e) => { e.target.style.visibility = 'hidden'; },
+        // Cached artwork can go missing under ECLIPSE — a cleared cache, a
+        // half-finished download. Falling back to the title's initials keeps
+        // the tile readable instead of leaving a blank hole in the shelf.
+        onError: (e) => {
+          // Find the tile before detaching, not after — a removed node has no
+          // ancestors to search.
+          const art = e.target.closest('.card__art');
+          e.target.remove();
+          art?.classList.add('card__art--blank');
+        },
       }),
       badges.length ? el('div', { class: 'card__badges' }, badges) : null,
       el('div', { class: 'card__overlay' }),
