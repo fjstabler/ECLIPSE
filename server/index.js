@@ -7,6 +7,7 @@ import { isFirstRun } from './db.js';
 import { attachUser, pruneSessions } from './auth.js';
 import { runScan } from './scanner/scanner.js';
 import { startWatcher, stopWatcher } from './scanner/watcher.js';
+import { syncConfigLibraries, listLibraries } from './libraries.js';
 
 import { router as authRoutes } from './routes/auth.routes.js';
 import { router as libraryRoutes } from './routes/library.routes.js';
@@ -82,21 +83,27 @@ const server = app.listen(config.port, config.host, async () => {
   }
   console.log('');
 
-  const movieDirs = config.libraries.movies;
-  const seriesDirs = config.libraries.series;
-  if (!movieDirs.length && !seriesDirs.length) {
+  // Bring the libraries described by the environment in line before anything
+  // reads them, so a changed ECLIPSE_MOVIES_DIR takes effect on this boot.
+  syncConfigLibraries();
+  const libraries = listLibraries();
+  const enabled = libraries.filter((l) => l.enabled && l.paths.length);
+  if (!enabled.length) {
     console.log('   No library folders configured yet.');
-    console.log('   Set ECLIPSE_MOVIES_DIR and ECLIPSE_SERIES_DIR in .env, then restart.');
+    console.log('   Set ECLIPSE_MOVIES_DIR and ECLIPSE_SERIES_DIR in .env, or add a library in Settings.');
   } else {
-    for (const d of movieDirs) console.log(`   Films      ${d}${fs.existsSync(d) ? '' : '  (missing)'}`);
-    for (const d of seriesDirs) console.log(`   Series     ${d}${fs.existsSync(d) ? '' : '  (missing)'}`);
+    for (const library of enabled) {
+      for (const d of library.paths) {
+        console.log(`   ${library.name.padEnd(10)} ${d}${fs.existsSync(d) ? '' : '  (missing)'}`);
+      }
+    }
   }
   if (isFirstRun()) console.log('\n   First run — open the URL above to create your profile.');
   console.log('');
 
   pruneSessions();
 
-  if (config.scanner.scanOnBoot && (movieDirs.length || seriesDirs.length)) {
+  if (config.scanner.scanOnBoot && enabled.length) {
     console.log('[scan] starting library scan…');
     runScan()
       .then((r) => {

@@ -47,6 +47,21 @@ for (const [column, ddl] of [
   ensureColumn('media_files', column, ddl);
 }
 
+// Which library a file came from. Nullable: a file scanned before libraries
+// existed still belongs to the library whose folder it sits under, and the
+// next scan fills that in.
+ensureColumn('media_files', 'library_id', 'library_id INTEGER REFERENCES libraries(id) ON DELETE CASCADE');
+
+// Profiles grew: a picture, a PIN, and a rating ceiling for the children's one.
+for (const [column, ddl] of [
+  ['avatar_image', 'avatar_image TEXT'],
+  ['pin_hash', 'pin_hash TEXT'],
+  ['pin_salt', 'pin_salt TEXT'],
+  ['max_rating', 'max_rating TEXT'],
+]) {
+  ensureColumn('users', column, ddl);
+}
+
 export function getSetting(key, fallback = null) {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
   return row ? row.value : fallback;

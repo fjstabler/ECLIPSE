@@ -3,6 +3,9 @@ import { db } from '../db.js';
 import { requireAuth } from '../auth.js';
 import * as library from '../library.js';
 import { homeRows, recommend, similarTo } from '../nova/engine.js';
+import { getFavourites } from '../library.js';
+import { listLibraries } from '../libraries.js';
+import { isAllowed } from '../parental.js';
 
 export const router = express.Router();
 
@@ -30,7 +33,7 @@ router.get('/home', (req, res) => {
 });
 
 router.get('/titles', (req, res) => {
-  const { kind, genre, q, sort, limit, offset } = req.query;
+  const { kind, genre, q, sort, limit, offset, library: libraryId } = req.query;
   const items = library.listTitles({
     kind: kind || null,
     genre: genre || null,
@@ -38,6 +41,8 @@ router.get('/titles', (req, res) => {
     sort: sort || 'added',
     limit: Math.min(Number(limit) || 60, 200),
     offset: Number(offset) || 0,
+    libraryId: Number(libraryId) || null,
+    maxRating: req.user.max_rating || null,
   });
   res.json({ items, total: library.countTitles(kind || null) });
 });
@@ -45,6 +50,11 @@ router.get('/titles', (req, res) => {
 router.get('/titles/:id', (req, res) => {
   const detail = library.getTitleDetail(Number(req.params.id), req.user.id);
   if (!detail) return res.status(404).json({ error: 'Title not found' });
+  // A restricted profile shouldn't be able to reach a blocked title by
+  // typing its address either.
+  if (!isAllowed(detail.certification, req.user.max_rating)) {
+    return res.status(403).json({ error: 'This title is not available on this profile' });
+  }
   detail.similar = similarTo(detail.id, { limit: 12 });
   res.json(detail);
 });
@@ -53,28 +63,114 @@ router.get('/genres', (req, res) => {
   res.json({ genres: library.allGenres() });
 });
 
+/**
+ * Search across everything the library knows: titles, episodes, the people in
+ * them, and the tags they carry.
+ *
+ * Results come back grouped rather than as one flat list, because "Villeneuve"
+ * and "Arrival" are different kinds of answer and flattening them loses the
+ * only thing that made the match make sense.
+ */
 router.get('/search', (req, res) => {
   const q = String(req.query.q || '').trim();
-  if (!q) return res.json({ items: [] });
-  const items = library.listTitles({ search: q, limit: 40 });
+  if (!q) return res.json({ items: [], episodes: [], people: [], tags: [] });
 
-  // Also match on people, so "Villeneuve" or "Cillian Murphy" finds things.
-  const byPerson = db
+  const maxRating = req.user.max_rating || null;
+  const like = `%${q}%`;
+  const items = library.listTitles({ search: q, limit: 40, maxRating });
+  const have = new Set(items.map((i) => i.id));
+
+  // People: matched as people, so the search can say "12 titles with Cillian
+  // Murphy" rather than silently mixing them into the title results.
+  const people = db
+    .prepare(`
+      SELECT tt.tag_value AS name, tt.tag_type AS role, COUNT(DISTINCT tt.title_id) AS count,
+             MAX(tt.image) AS image
+      FROM title_tags tt
+      WHERE tt.tag_type IN ('cast','director','creator','writer') AND tt.tag_value LIKE ?
+      GROUP BY tt.tag_value, tt.tag_type
+      ORDER BY count DESC LIMIT 12
+    `)
+    .all(like);
+
+  for (const row of db
     .prepare(`
       SELECT DISTINCT t.id FROM titles t JOIN title_tags tt ON tt.title_id = t.id
       WHERE tt.tag_type IN ('cast','director','creator','writer') AND tt.tag_value LIKE ?
       LIMIT 24
     `)
-    .all(`%${q}%`);
-
-  const have = new Set(items.map((i) => i.id));
-  for (const row of byPerson) {
+    .all(like)) {
     if (have.has(row.id)) continue;
     const t = library.getTitle(row.id);
-    if (t) items.push(t);
+    if (t && isAllowed(t.certification, maxRating)) {
+      items.push(t);
+      have.add(t.id);
+    }
   }
 
-  res.json({ items: items.slice(0, 48) });
+  // Episodes by their own name — "Ozymandias" should find the episode, not
+  // just leave you to guess which season it was in.
+  const episodes = db
+    .prepare(`
+      SELECT e.id, e.season, e.number, e.name, e.still, e.overview,
+             t.id AS title_id, t.title AS series, t.certification
+      FROM episodes e JOIN titles t ON t.id = e.title_id
+      WHERE e.name LIKE ? ORDER BY t.sort_title, e.season, e.number LIMIT 16
+    `)
+    .all(like)
+    .filter((e) => isAllowed(e.certification, maxRating))
+    .map((e) => ({
+      id: e.id, titleId: e.title_id, series: e.series, season: e.season,
+      number: e.number, name: e.name, still: e.still, overview: e.overview,
+    }));
+
+  // Genres, studios, collections and keywords, so a search doubles as a way
+  // of browsing sideways.
+  const tags = db
+    .prepare(`
+      SELECT tag_type AS type, tag_value AS value, COUNT(*) AS count
+      FROM title_tags
+      WHERE tag_type IN ('genre','studio','collection','keyword') AND tag_value LIKE ?
+      GROUP BY tag_type, tag_value ORDER BY count DESC LIMIT 12
+    `)
+    .all(like)
+    .map((t) => ({ type: t.type, value: t.value, count: t.count }));
+
+  res.json({
+    items: items.slice(0, 48),
+    episodes,
+    people: people.map((p) => ({ name: p.name, role: p.role, count: p.count, image: p.image })),
+    tags,
+  });
+});
+
+/** Everything featuring one person, for the page behind a cast photo. */
+router.get('/people/:name', (req, res) => {
+  const name = String(req.params.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Who?' });
+
+  const rows = db
+    .prepare(`
+      SELECT DISTINCT tt.title_id AS id, tt.tag_type AS role, tt.image
+      FROM title_tags tt
+      WHERE tt.tag_type IN ('cast','director','creator','writer') AND tt.tag_value = ? COLLATE NOCASE
+    `)
+    .all(name);
+
+  if (!rows.length) return res.status(404).json({ error: 'Nobody by that name is in this library' });
+
+  const maxRating = req.user.max_rating || null;
+  const titles = rows
+    .map((r) => ({ ...library.getTitle(r.id), role: r.role }))
+    .filter((t) => t.id && isAllowed(t.certification, maxRating))
+    .sort((a, b) => (b.year || 0) - (a.year || 0));
+
+  res.json({
+    name,
+    image: rows.find((r) => r.image)?.image || null,
+    roles: [...new Set(rows.map((r) => r.role))],
+    titles,
+  });
 });
 
 router.get('/recommendations', (req, res) => {
@@ -106,6 +202,31 @@ router.post('/titles/:id/rate', (req, res) => {
     `).run(req.user.id, titleId, score);
   }
   res.json({ ok: true, score });
+});
+
+/** Favourites — separate from My List, and used by N.O.V.A. as a strong signal. */
+router.post('/titles/:id/favourite', (req, res) => {
+  const id = Number(req.params.id);
+  const existing = db.prepare('SELECT 1 FROM favourites WHERE user_id = ? AND title_id = ?').get(req.user.id, id);
+  if (existing) {
+    db.prepare('DELETE FROM favourites WHERE user_id = ? AND title_id = ?').run(req.user.id, id);
+    return res.json({ favourite: false });
+  }
+  db.prepare('INSERT INTO favourites (user_id, title_id) VALUES (?, ?)').run(req.user.id, id);
+  res.json({ favourite: true });
+});
+
+router.get('/favourites', (req, res) => {
+  res.json({ items: getFavourites(req.user.id) });
+});
+
+router.get('/libraries', (req, res) => {
+  // The viewer-facing list: what to browse, not what to administer.
+  res.json({
+    libraries: listLibraries({ includeCounts: true })
+      .filter((l) => l.enabled)
+      .map((l) => ({ id: l.id, name: l.name, kind: l.kind, titles: l.titles })),
+  });
 });
 
 router.post('/titles/:id/watchlist', (req, res) => {

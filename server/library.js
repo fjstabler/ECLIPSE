@@ -3,6 +3,7 @@ import {
   getAudioTracks, getSubtitleTracks, getChapters, getMarkers, technicalInfo, qualityLabel, versionLabel,
 } from './media/streams.js';
 import { getPreferences, pickTracks } from './preferences.js';
+import { ratingSqlFilter } from './parental.js';
 
 export { getAudioTracks, getSubtitleTracks, technicalInfo };
 
@@ -46,10 +47,15 @@ export function decorate(row) {
     creators: grouped.creator || [],
     writers: grouped.writer || [],
     studios: grouped.studio || [],
+    countries: grouped.country || [],
+    collection: grouped.collection?.[0] || null,
   };
 }
 
-export function listTitles({ kind = null, genre = null, search = null, sort = 'added', limit = 200, offset = 0 } = {}) {
+export function listTitles({
+  kind = null, genre = null, search = null, sort = 'added', limit = 200, offset = 0,
+  libraryId = null, maxRating = null,
+} = {}) {
   const where = [];
   const params = {};
 
@@ -57,6 +63,14 @@ export function listTitles({ kind = null, genre = null, search = null, sort = 'a
     where.push('t.kind = @kind');
     params.kind = kind;
   }
+  if (libraryId) {
+    where.push('t.id IN (SELECT title_id FROM media_files WHERE library_id = @libraryId)');
+    params.libraryId = libraryId;
+  }
+  // A restricted profile never loads the rows at all, rather than loading
+  // them and hiding them somewhere in the client.
+  const ratingFilter = ratingSqlFilter(maxRating);
+  if (ratingFilter) where.push(ratingFilter.replace(/^AND /, ''));
   if (search) {
     where.push('(t.title LIKE @search OR t.original_title LIKE @search OR t.overview LIKE @search)');
     params.search = `%${search}%`;
@@ -163,6 +177,8 @@ export function getTitleDetail(id, userId) {
     title.userRating = rating?.score ?? 0;
     const wl = db.prepare('SELECT 1 FROM watchlist WHERE user_id = ? AND title_id = ?').get(userId, id);
     title.inWatchlist = Boolean(wl);
+    const fav = db.prepare('SELECT 1 FROM favourites WHERE user_id = ? AND title_id = ?').get(userId, id);
+    title.isFavourite = Boolean(fav);
     title.resume = getResumeFor(userId, id);
   }
 
@@ -294,6 +310,17 @@ export function continueWatching(userId, limit = 20) {
       progress: r.duration > 0 ? Math.min(1, r.position / r.duration) : 0,
     },
   }));
+}
+
+export function getFavourites(userId, limit = 50) {
+  const rows = db
+    .prepare(`
+      SELECT ${TITLE_COLUMNS} FROM favourites f
+      JOIN titles t ON t.id = f.title_id
+      WHERE f.user_id = ? ORDER BY f.created_at DESC LIMIT ?
+    `)
+    .all(userId, limit);
+  return rows.map(decorate);
 }
 
 export function getWatchlist(userId, limit = 50) {

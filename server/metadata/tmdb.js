@@ -304,5 +304,21 @@ function collectTags(data, kind) {
     tags.push({ type: 'studio', value: c.name, weight: 0.4, ordering: i });
   }
 
+  for (const [i, c] of (data.production_countries || data.origin_country || []).slice(0, 3).entries()) {
+    const name = typeof c === 'string' ? c : c.name;
+    if (name) tags.push({ type: 'country', value: name, weight: 0.2, ordering: i });
+  }
+
+  // A collection is the strongest "more like this" signal there is — the
+  // other films in the same series.
+  if (data.belongs_to_collection?.name) {
+    tags.push({
+      type: 'collection',
+      value: data.belongs_to_collection.name.replace(/ Collection$/i, ''),
+      weight: 1.5,
+      ordering: 0,
+    });
+  }
+
   return tags;
 }

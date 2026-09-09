@@ -9,28 +9,100 @@ import { hasTmdb, searchMovieCandidates, searchSeriesCandidates } from '../metad
 import { novaAvailable } from '../nova/openai.js';
 import { sortTitle } from '../util/parse.js';
 import { cacheImage } from '../metadata/artwork.js';
+import { listLibraries, createLibrary, updateLibrary, deleteLibrary } from '../libraries.js';
+import { activeSessions, listDevices, endSession, transcodeCount } from '../media/sessions.js';
+import { detectHardware } from '../media/transcode.js';
+import { recentLogs, logCounts, log } from '../log.js';
+import { serverHealth } from '../health.js';
 
 export const router = express.Router();
 router.use(requireAdmin);
 
-router.get('/status', (req, res) => {
-  const libs = [
-    ...config.libraries.movies.map((p) => ({ kind: 'movies', path: p, exists: fs.existsSync(p) })),
-    ...config.libraries.series.map((p) => ({ kind: 'series', path: p, exists: fs.existsSync(p) })),
-  ];
+router.get('/status', async (req, res) => {
+  const hardware = config.ffmpeg.enabled ? await detectHardware() : null;
 
   res.json({
     stats: libraryStats(),
-    libraries: libs,
+    libraries: listLibraries({ includeCounts: true }),
     scan: scanStatus(),
+    health: serverHealth(),
+    sessions: activeSessions(),
+    devices: listDevices(),
+    logs: logCounts(),
     integrations: {
       tmdb: hasTmdb(),
       nova: novaAvailable(),
       transcode: config.ffmpeg.enabled,
       watching: config.scanner.watch,
+      hardware: hardware?.available ? hardware.label : hardware ? hardware.label : 'Transcoding disabled',
+      hardwareAvailable: Boolean(hardware?.available),
+      transcodesRunning: transcodeCount(),
+      maxTranscodes: config.ffmpeg.maxSessions,
     },
     lastScans: db.prepare('SELECT * FROM scan_log ORDER BY id DESC LIMIT 5').all(),
   });
+});
+
+// --- libraries --------------------------------------------------------------
+
+router.get('/libraries', (req, res) => {
+  res.json({ libraries: listLibraries({ includeCounts: true }) });
+});
+
+router.post('/libraries', (req, res) => {
+  try {
+    res.json(createLibrary(req.body || {}));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.patch('/libraries/:id', (req, res) => {
+  try {
+    res.json(updateLibrary(Number(req.params.id), req.body || {}));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete('/libraries/:id', (req, res) => {
+  try {
+    deleteLibrary(Number(req.params.id));
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// --- what's happening right now ---------------------------------------------
+
+router.get('/sessions', (req, res) => {
+  res.json({ sessions: activeSessions(), devices: listDevices() });
+});
+
+/** Stop a stream from the admin page — the "who is pinning the CPU" button. */
+router.delete('/sessions/:id', (req, res) => {
+  endSession(req.params.id);
+  log.info('admin', `${req.user.display_name} stopped a playback session`);
+  res.json({ ok: true });
+});
+
+router.get('/logs', (req, res) => {
+  const level = ['info', 'warn', 'error'].includes(req.query.level) ? req.query.level : null;
+  res.json({ logs: recentLogs({ level, limit: Math.min(500, Number(req.query.limit) || 200) }) });
+});
+
+router.patch('/devices/:id', (req, res) => {
+  const name = String(req.body?.name || '').trim().slice(0, 60);
+  if (!name) return res.status(400).json({ error: 'A device needs a name' });
+  // renamed = 1 stops the next connection overwriting it with a sniffed name.
+  db.prepare('UPDATE devices SET name = ?, renamed = 1 WHERE id = ?').run(name, Number(req.params.id));
+  res.json({ ok: true, name });
+});
+
+router.delete('/devices/:id', (req, res) => {
+  db.prepare('DELETE FROM devices WHERE id = ?').run(Number(req.params.id));
+  res.json({ ok: true });
 });
 
 /** Kick off a scan. Returns immediately — poll /status for progress. */

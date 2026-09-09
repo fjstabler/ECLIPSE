@@ -12,7 +12,7 @@ let watcher = null;
 export function startWatcher() {
   if (!config.scanner.watch) return null;
 
-  const roots = [...config.libraries.movies, ...config.libraries.series];
+  const roots = [...new Set(scanTargets().map((t) => t.root))];
   if (!roots.length) return null;
 
   watcher = chokidar.watch(roots, {

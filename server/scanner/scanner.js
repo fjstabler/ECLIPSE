@@ -5,6 +5,8 @@ import { db } from '../db.js';
 import { config, VIDEO_EXTENSIONS, DIRECT_PLAY_EXTENSIONS, SUBTITLE_EXTENSIONS } from '../config.js';
 import { parseMovie, parseEpisode, sortTitle, parseSubtitleLanguage } from '../util/parse.js';
 import { probeFile, PROBE_VERSION } from '../media/probe.js';
+import { scanTargets, markScanned } from '../libraries.js';
+import { log } from '../log.js';
 import * as tmdb from '../metadata/tmdb.js';
 import { cacheImage, placeholderPoster, placeholderBackdrop } from '../metadata/artwork.js';
 
@@ -254,17 +256,17 @@ async function lookupSeason(tmdbId, seasonNumber) {
 
 const getFileByPath = db.prepare('SELECT * FROM media_files WHERE path = ?');
 
-async function ingestMovie(filePath, stat) {
+async function ingestMovie(filePath, stat, libraryId = null) {
   const parsed = parseMovie(filePath);
   const meta = await lookupMovie(parsed.title, parsed.year);
   const existingTitleId = getFileByPath.get(filePath)?.title_id || null;
   const { id: titleId, manual } = upsertTitle({ kind: 'movie', title: parsed.title, year: parsed.year, meta, existingTitleId });
   if (meta?.tags && !manual) await replaceTags(titleId, meta.tags);
-  await attachFile({ filePath, stat, titleId, episodeId: null });
+  await attachFile({ filePath, stat, titleId, episodeId: null, libraryId });
   return titleId;
 }
 
-async function ingestEpisode(filePath, stat, libraryRoot) {
+async function ingestEpisode(filePath, stat, libraryRoot, libraryId = null) {
   const parsed = parseEpisode(filePath, libraryRoot);
   if (!parsed) return null;
 
@@ -322,11 +324,11 @@ async function ingestEpisode(filePath, stat, libraryRoot) {
     .prepare('SELECT id FROM episodes WHERE title_id = ? AND season = ? AND number = ?')
     .get(titleId, parsed.season, parsed.episode);
 
-  await attachFile({ filePath, stat, titleId, episodeId: episodeRow.id });
+  await attachFile({ filePath, stat, titleId, episodeId: episodeRow.id, libraryId });
   return titleId;
 }
 
-async function attachFile({ filePath, stat, titleId, episodeId }) {
+async function attachFile({ filePath, stat, titleId, episodeId, libraryId = null }) {
   const ext = path.extname(filePath).toLowerCase();
   const existing = getFileByPath.get(filePath);
 
@@ -341,6 +343,7 @@ async function attachFile({ filePath, stat, titleId, episodeId }) {
   const row = {
     title_id: titleId,
     episode_id: episodeId,
+    library_id: libraryId ?? existing?.library_id ?? null,
     path: filePath,
     filename: path.basename(filePath),
     extension: ext,
@@ -369,16 +372,16 @@ async function attachFile({ filePath, stat, titleId, episodeId }) {
   };
 
   db.prepare(`
-    INSERT INTO media_files (title_id, episode_id, path, filename, extension, size, mtime, duration,
+    INSERT INTO media_files (title_id, episode_id, library_id, path, filename, extension, size, mtime, duration,
       width, height, video_codec, audio_codec, container, bitrate, video_bitrate, frame_rate, bit_depth,
       pixel_format, color_space, color_transfer, color_primaries, hdr_format, aspect_ratio, video_profile,
       stream_count, probe_version, direct_play, scanned_at)
-    VALUES (@title_id, @episode_id, @path, @filename, @extension, @size, @mtime, @duration,
+    VALUES (@title_id, @episode_id, @library_id, @path, @filename, @extension, @size, @mtime, @duration,
       @width, @height, @video_codec, @audio_codec, @container, @bitrate, @video_bitrate, @frame_rate, @bit_depth,
       @pixel_format, @color_space, @color_transfer, @color_primaries, @hdr_format, @aspect_ratio, @video_profile,
       @stream_count, @probe_version, @direct_play, datetime('now'))
     ON CONFLICT(path) DO UPDATE SET
-      title_id=@title_id, episode_id=@episode_id, size=@size, mtime=@mtime, duration=@duration,
+      title_id=@title_id, episode_id=@episode_id, library_id=@library_id, size=@size, mtime=@mtime, duration=@duration,
       width=@width, height=@height, video_codec=@video_codec, audio_codec=@audio_codec,
       container=@container, bitrate=@bitrate, video_bitrate=@video_bitrate, frame_rate=@frame_rate,
       bit_depth=@bit_depth, pixel_format=@pixel_format, color_space=@color_space,
@@ -528,13 +531,23 @@ export async function runScan({ full = false } = {}) {
   let updated = 0;
 
   try {
-    const jobs = [];
-    for (const root of config.libraries.movies) jobs.push({ root, kind: 'movie' });
-    for (const root of config.libraries.series) jobs.push({ root, kind: 'series' });
+    const jobs = scanTargets();
 
     if (!jobs.length) {
       lastProgress = { state: 'idle', found: 0, processed: 0, added: 0, updated: 0, removed: 0, current: null };
       return { skipped: true, reason: 'No library folders are configured' };
+    }
+
+    // Files scanned before libraries existed — or before this library was
+    // added — carry no library. A scan skips files that haven't changed, so
+    // without this they would stay unassigned until something touched them,
+    // and every library would report an empty count on an existing install.
+    // Longest root first, so a series library nested inside a films folder
+    // claims its own files rather than losing them to the parent.
+    for (const job of [...jobs].sort((a, b) => b.root.length - a.root.length)) {
+      if (!job.libraryId) continue;
+      db.prepare("UPDATE media_files SET library_id = ? WHERE library_id IS NULL AND path LIKE ? ESCAPE '\\'")
+        .run(job.libraryId, `${job.root.replace(/[\\%_]/g, '\\$&')}${path.sep}%`);
     }
 
     const allFiles = [];
@@ -566,16 +579,16 @@ export async function runScan({ full = false } = {}) {
         }
 
         if (item.kind === 'series') {
-          const id = await ingestEpisode(item.file, stat, item.root);
+          const id = await ingestEpisode(item.file, stat, item.root, item.libraryId);
           if (!id) {
             // No episode markers — treat it as a film sitting in the series folder.
-            await ingestMovie(item.file, stat);
+            await ingestMovie(item.file, stat, item.libraryId);
           }
         } else {
           // A film library can still contain an obviously-episodic file.
           const ep = parseEpisode(item.file, item.root);
-          if (ep) await ingestEpisode(item.file, stat, item.root);
-          else await ingestMovie(item.file, stat);
+          if (ep) await ingestEpisode(item.file, stat, item.root, item.libraryId);
+          else await ingestMovie(item.file, stat, item.libraryId);
         }
 
         seen.add(item.file);
@@ -614,8 +627,12 @@ export async function runScan({ full = false } = {}) {
       "UPDATE scan_log SET finished_at = datetime('now'), added = ?, updated = ?, removed = ?, errors = ? WHERE id = ?"
     ).run(added, updated, removed, JSON.stringify(errors.slice(0, 50)), logId);
 
+    markScanned([...new Set(jobs.map((j) => j.libraryId).filter(Boolean))]);
+
     lastProgress.state = 'idle';
     lastProgress.current = null;
+    if (errors.length) log.warn('scan', `Scan finished with ${errors.length} problem(s)`, errors.slice(0, 5).join(' | '));
+    else log.info('scan', `Scan finished — ${added} added, ${updated} updated, ${removed} removed`);
     return { added, updated, removed, errors };
   } finally {
     scanning = false;
@@ -632,18 +649,23 @@ export async function ingestPath(filePath) {
   if (!VIDEO_EXTENSIONS.has(ext)) return null;
   const stat = await fsp.stat(filePath);
 
-  const inSeries = config.libraries.series.some((root) => filePath.startsWith(root + path.sep));
-  const root = [...config.libraries.series, ...config.libraries.movies].find((r) =>
-    filePath.startsWith(r + path.sep)
-  );
+  // Which library this file appeared in decides how it's read. The longest
+  // matching root wins, so a series library nested inside a films folder
+  // still claims its own episodes.
+  const target = scanTargets()
+    .filter((t) => filePath.startsWith(t.root + path.sep))
+    .sort((a, b) => b.root.length - a.root.length)[0];
 
-  if (inSeries) {
-    const id = await ingestEpisode(filePath, stat, root);
+  const root = target?.root;
+  const libraryId = target?.libraryId ?? null;
+
+  if (target?.kind === 'series') {
+    const id = await ingestEpisode(filePath, stat, root, libraryId);
     if (id) return id;
   }
   const ep = parseEpisode(filePath, root);
-  if (ep) return ingestEpisode(filePath, stat, root);
-  return ingestMovie(filePath, stat);
+  if (ep) return ingestEpisode(filePath, stat, root, libraryId);
+  return ingestMovie(filePath, stat, libraryId);
 }
 
 export function removePath(filePath) {

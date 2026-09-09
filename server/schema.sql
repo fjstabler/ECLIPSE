@@ -6,6 +6,25 @@ PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
 -- ---------------------------------------------------------------------------
+-- Libraries: named collections of folders. "Films", "Series", "Anime",
+-- "Documentaries" — each with its own type and its own list of places to look.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS libraries (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  name        TEXT NOT NULL,
+  kind        TEXT NOT NULL CHECK (kind IN ('movies', 'series')),
+  paths       TEXT NOT NULL DEFAULT '[]',   -- JSON array of folders
+  enabled     INTEGER NOT NULL DEFAULT 1,
+  -- 'config' libraries come from ECLIPSE_MOVIES_DIR / ECLIPSE_SERIES_DIR and
+  -- are kept in step with them on every boot; 'user' ones are added here and
+  -- belong to whoever added them.
+  source      TEXT NOT NULL DEFAULT 'user' CHECK (source IN ('config', 'user')),
+  scanned_at  TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (name)
+);
+
+-- ---------------------------------------------------------------------------
 -- Titles: one row per film or series. Episodes hang off series rows.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS titles (
@@ -286,6 +305,15 @@ CREATE TABLE IF NOT EXISTS ratings (
   user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   title_id   INTEGER NOT NULL REFERENCES titles(id) ON DELETE CASCADE,
   score      INTEGER NOT NULL CHECK (score IN (-1, 1, 2)), -- down / up / love
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (user_id, title_id)
+);
+
+-- Favourites are a different thing from My List: the list is "I mean to watch
+-- this", a favourite is "I love this and want it near the top".
+CREATE TABLE IF NOT EXISTS favourites (
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title_id   INTEGER NOT NULL REFERENCES titles(id) ON DELETE CASCADE,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (user_id, title_id)
 );
